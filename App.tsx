@@ -62,7 +62,23 @@ handleUpdateChatSession({ ...session, messages: updatedMessages, lastUpdatedAt: 
 
 }, [isSending, apiKeyMissing, handleUpdateChatSession]);
 
-const handleExportChats = () => { if (chatSessions.length === 0) return alert("No chats to export."); const blob = new Blob([JSON.stringify(chatSessions, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = patel_chat_backup_${new Date().toISOString().slice(0, 10)}.json; document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url); setGlobalError("Chats exported successfully!"); setTimeout(() => setGlobalError(null), 3000); };
+const handleExportChats = () => { 
+	if (chatSessions.length === 0) 
+		return alert("No chats to export.");
+	const blob = new Blob([JSON.stringify(chatSessions, null, 2)], { 
+		type: "application/json" 
+	});
+	const url = URL.createObjectURL(blob);
+	const link = document.createElement('a');
+	link.href = url;
+	link.download = patel_chat_backup_${new Date().toISOString().slice(0, 10)}.json;
+			     document.body.appendChild(link);
+			     link.click();
+			     document.body.removeChild(link);
+			     URL.revokeObjectURL(url);
+			     setGlobalError("Chats exported successfully!");
+			     setTimeout(() => setGlobalError(null), 3000);
+			    }
 
 const handleImportChats = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return;
 
