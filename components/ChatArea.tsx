@@ -1,10 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Message, ChatSession, WebSource, GenerateContentResponse, GroundingChunk, QuickPrompt } from '../types';
+import {
+  Message, ChatSession, WebSource,
+  GenerateContentResponse, GroundingChunk, QuickPrompt
+} from '../types';
 import ChatMessage from './ChatMessage';
 import LoadingSpinner from './LoadingSpinner';
 import {
-  SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon, RegenerateIcon, TrashIcon,
-  BoltIcon, BoldIcon, ItalicIcon, CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon
+  SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon,
+  RegenerateIcon, TrashIcon, BoltIcon, BoldIcon, ItalicIcon,
+  CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon
 } from './Icons';
 import { sendMessage as sendMessageToGemini } from '../services/geminiService';
 
@@ -32,12 +36,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   quickPrompts,
   onDeleteCurrentChat
 }) => {
-  const [input, setInput] = useState<string>('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [currentSearchTerm, setCurrentSearchTerm] = useState<string>(initialSearchTerm);
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const [currentSearchTerm, setCurrentSearchTerm] = useState(initialSearchTerm);
   const [showQuickPrompts, setShowQuickPrompts] = useState(false);
+
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -59,123 +64,109 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTerm = e.target.value;
     setCurrentSearchTerm(newTerm);
-    if (onSearchTermChange) {
-      onSearchTermChange(newTerm);
-    }
+    onSearchTermChange?.(newTerm);
   };
 
-  const extractWebSources = (groundingChunks?: GroundingChunk[]): WebSource[] => {
-    if (!groundingChunks) return [];
-    const sources: WebSource[] = [];
-    groundingChunks.forEach(chunk => {
-      if (chunk.web && chunk.web.uri) {
-        sources.push({ uri: chunk.web.uri, title: chunk.web.title || chunk.web.uri });
-      }
-    });
-    return sources;
-  };
+  const extractWebSources = (groundingChunks?: GroundingChunk[]): WebSource[] =>
+    groundingChunks?.filter(chunk => chunk.web?.uri)
+      .map(chunk => ({
+        uri: chunk.web!.uri,
+        title: chunk.web!.title || chunk.web!.uri
+      })) || [];
 
   const filteredMessages = useMemo(() => {
     if (!activeChatSession) return [];
-    if (!currentSearchTerm.trim()) return activeChatSession.messages;
-    return activeChatSession.messages.filter(msg =>
-      msg.text.toLowerCase().includes(currentSearchTerm.toLowerCase())
-    );
+    const term = currentSearchTerm.trim().toLowerCase();
+    return !term
+      ? activeChatSession.messages
+      : activeChatSession.messages.filter(m => m.text.toLowerCase().includes(term));
   }, [activeChatSession, currentSearchTerm]);
 
-  const handleSend = async (messageTextOverride?: string, isRegeneration?: boolean, historyOverride?: Message[]) => {
+  const handleSend = async (
+    messageTextOverride?: string,
+    isRegeneration?: boolean,
+    historyOverride?: Message[]
+  ) => {
     const textToSend = messageTextOverride || input.trim();
-    if (textToSend === '' || isSending || !activeChatSession || isApiKeyMissing) return;
+    if (!textToSend || isSending || !activeChatSession || isApiKeyMissing) return;
 
-    const currentSessionStateBeforeSend = activeChatSession;
-    let messagesForThisSendOperation: Message[];
+    const sessionBeforeSend = activeChatSession;
+    const systemInstruction = sessionBeforeSend.systemInstruction;
+    let messages = sessionBeforeSend.messages;
     let botMessageId: string;
 
-    const currentSystemInstruction = currentSessionStateBeforeSend.systemInstruction;
-
     if (isRegeneration) {
-      const regenTargetIndex = currentSessionStateBeforeSend.messages.findIndex(m => m.isLoading && m.sender === 'bot');
-      if (regenTargetIndex === -1) return;
-      botMessageId = currentSessionStateBeforeSend.messages[regenTargetIndex].id;
-      messagesForThisSendOperation = [...currentSessionStateBeforeSend.messages];
+      const index = messages.findIndex(m => m.isLoading && m.sender === 'bot');
+      if (index === -1) return;
+      botMessageId = messages[index].id;
     } else {
       const userMessage: Message = {
-        id: Date.now().toString(),
+        id: `${Date.now()}`,
         sender: 'user',
         text: textToSend,
-        timestamp: Date.now(),
+        timestamp: Date.now()
       };
-      botMessageId = (Date.now() + 1).toString();
-      const botPlaceholderMessage: Message = {
+      botMessageId = `${Date.now() + 1}`;
+      const botPlaceholder: Message = {
         id: botMessageId,
         sender: 'bot',
         text: '',
         isLoading: true,
-        timestamp: Date.now() + 1,
+        timestamp: Date.now() + 1
       };
-      messagesForThisSendOperation = [...currentSessionStateBeforeSend.messages, userMessage, botPlaceholderMessage];
+      messages = [...messages, userMessage, botPlaceholder];
       onUpdateChatSession({
-        ...currentSessionStateBeforeSend,
-        messages: messagesForThisSendOperation,
-        lastUpdatedAt: Date.now(),
+        ...sessionBeforeSend,
+        messages,
+        lastUpdatedAt: Date.now()
       });
-    }
-
-    if (!isRegeneration) {
       setInput('');
       if (textAreaRef.current) textAreaRef.current.style.height = 'auto';
     }
+
     setIsSending(true);
     setError(null);
 
     try {
-      // Fixed history calculation logic
-      const historyForGemini = historyOverride ||
-        (isRegeneration
-          ? currentSessionStateBeforeSend.messages.slice(0, currentSessionStateBeforeSend.messages.findIndex(m => m.id === botMessageId))
-          : messagesForThisSendOperation.filter(m => 
-              m.id !== botMessageId && 
-              (m.sender !== 'bot' || (m.sender === 'bot' && !m.isLoading))
-            )
-        );
-
-      let accumulatedBotText = "";
-      const stream = await sendMessageToGemini(textToSend, historyForGemini, currentSystemInstruction);
-      
-      for await (const chunk of stream) {
-        if (chunk && typeof chunk.text === 'string') {
-          accumulatedBotText += chunk.text;
-        }
-        messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>
-          msg.id === botMessageId ? { ...msg, text: accumulatedBotText, isLoading: true, isError: false } : msg
-        );
-        onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });
-      }
-      
-      const aggregatedResponse = await stream.response;
-      let finalBotText = accumulatedBotText;
-      let sources: WebSource[] = [];
-
-      if (aggregatedResponse) {
-        if (typeof aggregatedResponse.text === 'string' && aggregatedResponse.text.trim().length > 0) {
-          finalBotText = aggregatedResponse.text;
-        }
-        sources = extractWebSources(aggregatedResponse.candidates?.[0]?.groundingMetadata?.groundingChunks);
-      }
-
-      messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>
-        msg.id === botMessageId ? { ...msg, text: finalBotText, isLoading: false, sources: sources, isError: false } : msg
+      const history = historyOverride || (
+        isRegeneration
+          ? sessionBeforeSend.messages.slice(0, sessionBeforeSend.messages.findIndex(m => m.id === botMessageId))
+          : messages.filter(m => m.id !== botMessageId && !(m.sender === 'bot' && m.isLoading))
       );
-      onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });
+
+      let fullText = '';
+      const stream = await sendMessageToGemini(textToSend, history, systemInstruction);
+
+      for await (const chunk of stream) {
+        if (chunk?.text) {
+          fullText = chunk.text;
+          messages = messages.map(m =>
+            m.id === botMessageId ? { ...m, text: fullText, isLoading: true, isError: false } : m
+          );
+          onUpdateChatSession({ ...sessionBeforeSend, messages, lastUpdatedAt: Date.now() });
+        }
+      }
+
+      const final = await stream.response;
+      const finalText = final?.text?.trim() || fullText;
+      const sources = extractWebSources(final?.candidates?.[0]?.groundingMetadata?.groundingChunks);
+
+      messages = messages.map(m =>
+        m.id === botMessageId
+          ? { ...m, text: finalText, isLoading: false, sources, isError: false }
+          : m
+      );
+      onUpdateChatSession({ ...sessionBeforeSend, messages, lastUpdatedAt: Date.now() });
 
     } catch (err: any) {
-      console.error("Error sending message:", err);
-      const errorMessage = err.message || "An unknown error occurred.";
-      setError(errorMessage);
-      messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>
-        msg.id === botMessageId ? { ...msg, text: `Error: ${errorMessage}`, isLoading: false, isError: true } : msg
+      const errorMsg = err.message || 'An unknown error occurred.';
+      setError(errorMsg);
+      messages = messages.map(m =>
+        m.id === botMessageId
+          ? { ...m, text: `Error: ${errorMsg}`, isLoading: false, isError: true }
+          : m
       );
-      onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });
+      onUpdateChatSession({ ...sessionBeforeSend, messages, lastUpdatedAt: Date.now() });
     } finally {
       setIsSending(false);
     }
@@ -183,66 +174,42 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   const initiateRegeneration = async (messageId: string) => {
     if (!activeChatSession || isSending) return;
-    const botMessageToRegenerate = activeChatSession.messages.find(m => m.id === messageId && m.sender === 'bot');
-    if (!botMessageToRegenerate) return;
-    const botMessageIndex = activeChatSession.messages.findIndex(m => m.id === messageId);
-    if (botMessageIndex < 1) return;
-    const userPromptMessage = activeChatSession.messages[botMessageIndex - 1];
-    if (userPromptMessage.sender !== 'user') return;
+    const index = activeChatSession.messages.findIndex(m => m.id === messageId);
+    if (index < 1 || activeChatSession.messages[index - 1].sender !== 'user') return;
 
-    // Fixed: Use correct slicing index to include user message
-    const historyForRegen = activeChatSession.messages.slice(0, botMessageIndex);
-    
-    const updatedMessagesForRegenUI = activeChatSession.messages.map(msg =>   
-      msg.id === messageId ? { ...msg, text: '', isLoading: true, isError: false, sources: [] } : msg  
+    const history = activeChatSession.messages.slice(0, index);
+    const updatedMessages = activeChatSession.messages.map(m =>
+      m.id === messageId
+        ? { ...m, text: '', isLoading: true, isError: false, sources: [] }
+        : m
     );
-    
-    onUpdateChatSession({ ...activeChatSession, messages: updatedMessagesForRegenUI, lastUpdatedAt: Date.now() });
-    await handleSend(userPromptMessage.text, true, historyForRegen);
+    onUpdateChatSession({ ...activeChatSession, messages: updatedMessages, lastUpdatedAt: Date.now() });
+    await handleSend(activeChatSession.messages[index - 1].text, true, history);
   };
 
-  const applyMarkdownFormat = (formatType: 'bold' | 'italic' | 'inline-code' | 'code-block' | 'list-item') => {
-    if (!textAreaRef.current) return;
+  const applyMarkdownFormat = (type: 'bold' | 'italic' | 'inline-code' | 'code-block' | 'list-item') => {
     const textarea = textAreaRef.current;
+    if (!textarea) return;
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-    const selectedText = textarea.value.substring(start, end);
-    let newText = '';
+    const selected = textarea.value.substring(start, end);
 
-    switch (formatType) {
-      case 'bold':
-        newText = `**${selectedText}**`;
-        break;
-      case 'italic':
-        newText = `*${selectedText}*`;
-        break;
-      case 'inline-code':
-        newText = `\`${selectedText}\``;
-        break;
-      case 'code-block':
-        newText = `\`\`\`\n${selectedText}\n\`\`\``;
-        break;
-      case 'list-item':
-        if (selectedText.includes('\n')) {
-          newText = selectedText.split('\n').map(line => `- ${line}`).join('\n');
-        } else {
-          newText = `- ${selectedText}`;
-        }
-        break;
-      default:
-        return;
-    }
+    const wrapped = {
+      bold: `**${selected}**`,
+      italic: `*${selected}*`,
+      'inline-code': `\`${selected}\``,
+      'code-block': `\`\`\`\n${selected}\n\`\`\``,
+      'list-item': selected.includes('\n') ? selected.split('\n').map(l => `- ${l}`).join('\n') : `- ${selected}`
+    }[type];
 
-    const before = textarea.value.substring(0, start);
-    const after = textarea.value.substring(end);
-    setInput(before + newText + after);
+    const updated = textarea.value.slice(0, start) + wrapped + textarea.value.slice(end);
+    setInput(updated);
 
-    const newCursorPosition = start + newText.length;
     setTimeout(() => {
       textarea.focus();
-      textarea.setSelectionRange(newCursorPosition, newCursorPosition);
-      const event = new Event('input', { bubbles: true });
-      textarea.dispatchEvent(event);
+      const pos = start + wrapped.length;
+      textarea.setSelectionRange(pos, pos);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
     }, 0);
   };
 
@@ -250,10 +217,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 text-center glass-panel m-2 sm:m-4">
         <WarningIcon className="h-16 w-16 text-red-400 mb-6" />
-        <h2 className="text-xl sm:text-2xl font-semibold text-white mb-3">API Key Error</h2>
-        <p className="text-text-secondary text-sm sm:text-base">
-          The Gemini API key is missing or invalid. Please set the <code>API_KEY</code> environment variable.
-        </p>
+        <h2 className="text-xl font-semibold text-white mb-3">API Key Error</h2>
+        <p className="text-text-secondary">Missing or invalid Gemini API key. Set the <code>API_KEY</code>.</p>
       </div>
     );
   }
@@ -262,72 +227,73 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-6 text-center glass-panel m-2 sm:m-4">
         <ChatBubbleSvgIcon className="h-16 w-16 text-text-muted mb-6" />
-        <h2 className="text-xl sm:text-2xl font-semibold text-white mb-3">No Chat Selected</h2>
-        <p className="text-text-secondary text-sm sm:text-base">Select or create a chat from the sidebar to begin.</p>
+        <h2 className="text-xl font-semibold text-white mb-3">No Chat Selected</h2>
+        <p className="text-text-secondary">Create or select a chat to begin.</p>
       </div>
     );
   }
 
   return (
     <div className="flex-1 flex flex-col glass-panel min-w-0">
-      <header className="p-3 sm:p-4 border-b border-glass-stroke flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-4">
-        <h2 className="text-md sm:text-lg font-semibold text-white truncate order-1 sm:order-none flex-1 min-w-0" title={activeChatSession.title}>
-          {activeChatSession.title}
-        </h2>
-        <div className="relative w-full sm:w-auto sm:max-w-xs md:max-w-sm order-none sm:order-1 flex-shrink">
+      {/* Header */}
+      <header className="p-4 border-b border-glass-stroke flex flex-col sm:flex-row items-center justify-between gap-4">
+        <h2 className="text-lg font-semibold text-white truncate flex-1">{activeChatSession.title}</h2>
+        <div className="relative w-full sm:w-auto sm:max-w-sm">
           <input
             type="text"
             placeholder="Search in chat..."
             value={currentSearchTerm}
             onChange={handleSearchChange}
-            className="w-full pl-10 pr-3 py-2 text-xs sm:text-sm glass-input rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none transition-shadow"
+            className="w-full pl-10 pr-3 py-2 glass-input rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none"
           />
           <SearchIcon className="h-4 w-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
         </div>
         <button
           onClick={onDeleteCurrentChat}
-          className="p-2 glass-button rounded-lg text-text-muted hover:text-red-400 order-2 sm:order-2"
-          title="Delete Current Chat"
-          aria-label="Delete Current Chat"
-          disabled={!activeChatSession}
+          className="p-2 glass-button rounded-lg text-text-muted hover:text-red-400"
+          title="Delete Chat"
+          aria-label="Delete"
         >
           <TrashIcon className="h-5 w-5" />
         </button>
       </header>
-      <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 space-y-4">
-        {filteredMessages.map((msg, index, arr) => (
+
+      {/* Message List */}
+      <main className="flex-1 overflow-y-auto p-4 space-y-4">
+        {filteredMessages.map((msg, i, arr) => (
           <ChatMessage
             key={msg.id}
             message={msg}
             searchTerm={currentSearchTerm}
             onRegenerate={initiateRegeneration}
-            isLastBotMessage={index === arr.length - 1 && msg.sender === 'bot'}
+            isLastBotMessage={i === arr.length - 1 && msg.sender === 'bot'}
           />
         ))}
         <div ref={messagesEndRef} />
       </main>
-      <footer className="p-2 sm:p-3 md:p-4 border-t border-glass-stroke">
+
+      {/* Footer */}
+      <footer className="p-4 border-t border-glass-stroke">
         {error && (
-          <div className="mb-2 p-3 bg-red-500/30 text-red-100 border border-red-500/50 rounded-lg text-xs sm:text-sm">
+          <div className="mb-2 p-3 bg-red-500/20 text-red-100 border border-red-500/50 rounded-md text-sm">
             {error}
           </div>
         )}
-        
+
         {quickPrompts.length > 0 && (
           <div className="mb-2 relative">
             <button
               onClick={() => setShowQuickPrompts(!showQuickPrompts)}
-              className="flex items-center w-full sm:w-auto text-left p-2 glass-button rounded-md text-xs hover:bg-white/10"
-              title="Use a Quick Prompt"
+              className="flex items-center w-full sm:w-auto text-left p-2 glass-button rounded-md text-sm hover:bg-white/10"
             >
               <BoltIcon className="h-4 w-4 mr-2 text-yellow-400" />
               Quick Prompts
               <svg className={`w-3 h-3 ml-auto transition-transform ${showQuickPrompts ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
             {showQuickPrompts && (
-              <div className="absolute bottom-full left-0 mb-1 w-full sm:w-72 max-h-48 overflow-y-auto glass-panel p-2 rounded-md shadow-lg z-10 border border-glass-stroke">
+              <div className="absolute bottom-full left-0 mb-1 w-full sm:w-72 max-h-48 overflow-y-auto glass-panel p-2 rounded-md shadow-lg z-10">
                 {quickPrompts.map(qp => (
                   <button
                     key={qp.id}
@@ -335,17 +301,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       setInput(prev => prev ? `${prev}\n${qp.text}` : qp.text);
                       setShowQuickPrompts(false);
                       textAreaRef.current?.focus();
-                      setTimeout(() => {
-                        if (textAreaRef.current) {
-                          const event = new Event('input', { bubbles: true });
-                          textAreaRef.current.dispatchEvent(event);
-                        }
-                      }, 0);
+                      setTimeout(() => textAreaRef.current?.dispatchEvent(new Event('input', { bubbles: true })), 0);
                     }}
-                    className="block w-full text-left p-2.5 hover:bg-white/10 rounded-md text-xs"
-                    title={qp.text}
+                    className="block w-full text-left p-2 hover:bg-white/10 rounded-md"
                   >
-                    <p className="font-medium text-text-primary truncate">{qp.title}</p>
+                    <p className="font-medium text-white truncate">{qp.title}</p>
                     <p className="text-text-muted truncate text-xs">{qp.text}</p>
                   </button>
                 ))}
@@ -354,13 +314,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         )}
 
-        <div className="flex items-center space-x-1 mb-2">
+        {/* Markdown Controls */}
+        <div className="flex items-center space-x-2 mb-2">
           {['bold', 'italic', 'inline-code', 'code-block', 'list-item'].map(type => (
             <button
               key={type}
               onClick={() => applyMarkdownFormat(type as any)}
               className="p-2 glass-button rounded-md hover:bg-white/10"
-              title={type.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+              title={type}
               disabled={isSending || isApiKeyMissing}
             >
               {type === 'bold' && <BoldIcon className="h-4 w-4" />}
@@ -372,36 +333,37 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           ))}
         </div>
 
-        <div className="flex items-end space-x-2 md:space-x-3">
+        {/* Input Area */}
+        <div className="flex items-end space-x-3">
           <textarea
             ref={textAreaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => {
+            onChange={e => setInput(e.target.value)}
+            onKeyPress={e => {
               if (e.key === 'Enter' && !e.shiftKey && !isSending) {
                 e.preventDefault();
                 handleSend();
               }
             }}
             placeholder="Send a message (Shift+Enter for new line)..."
-            className="flex-1 p-3 glass-input rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none transition-shadow disabled:opacity-70 resize-none text-sm"
+            className="flex-1 p-3 glass-input rounded-lg text-sm resize-none"
             rows={1}
             style={{ minHeight: '44px', maxHeight: '120px' }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+            onInput={e => {
+              const el = e.target as HTMLTextAreaElement;
+              el.style.height = 'auto';
+              el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
             }}
             disabled={isSending || isApiKeyMissing}
-            aria-label="Chat input"
           />
           <button
             onClick={() => handleSend()}
             disabled={isSending || input.trim() === '' || isApiKeyMissing}
-            className="p-3 glass-button rounded-lg font-semibold h-[44px] aspect-square flex items-center justify-center self-end"
-            aria-label="Send message"
+            className="p-3 glass-button rounded-lg h-[44px] aspect-square flex items-center justify-center"
           >
-            {isSending ? <LoadingSpinner size="sm" color="white" /> : <SendIcon className="h-5 w-5 text-white" />}
+            {isSending
+              ? <LoadingSpinner size="sm" color="white" />
+              : <SendIcon className="h-5 w-5 text-white" />}
           </button>
         </div>
       </footer>
