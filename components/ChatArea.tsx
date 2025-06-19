@@ -83,6 +83,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     );
   }, [activeChatSession, currentSearchTerm]);
 
+  const getLoadingMessageText = (): string => {
+    if (Math.random() < 0.3) return 'Searching...';
+    if (Math.random() < 0.6) return 'Working...';
+    return 'Thinking...';
+  };
+
   const handleSend = async (messageTextOverride?: string, isRegeneration?: boolean, historyOverride?: Message[]) => {
     const textToSend = messageTextOverride || input.trim();
     if (textToSend === '' || isSending || !activeChatSession || isApiKeyMissing) return;
@@ -108,7 +114,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       const botPlaceholderMessage: Message = {  
         id: botMessageId,  
         sender: 'bot',  
-        text: '',  
+        text: getLoadingMessageText(),
         isLoading: true,  
         timestamp: Date.now() + 1,  
       };  
@@ -176,7 +182,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     if (userPromptMessage.sender !== 'user') return;
 
     const updatedMessagesForRegenUI = activeChatSession.messages.map(msg =>   
-        msg.id === messageId ? { ...msg, text: '', isLoading: true, isError: false, sources: [] } : msg  
+        msg.id === messageId ? { ...msg, text: getLoadingMessageText(), isLoading: true, isError: false, sources: [] } : msg  
     );  
     onUpdateChatSession({ ...activeChatSession, messages: updatedMessagesForRegenUI, lastUpdatedAt: Date.now() });  
     const historyForRegen = activeChatSession.messages.slice(0, botMessageIndex - 1);  
