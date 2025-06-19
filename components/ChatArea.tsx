@@ -432,4 +432,4 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               title={type.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
               disabled={isSending || isApiKeyMissing}
             >
-              {type === 'bold' && <BoldIcon className="h-4 w-4"
+              {type === 'bold' && <BoldIcon className="h-4 w-4"}
