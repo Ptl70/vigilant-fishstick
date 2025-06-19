@@ -132,7 +132,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       const historyForGemini = historyOverride ||
         (isRegeneration
           ? currentSessionStateBeforeSend.messages.slice(0, currentSessionStateBeforeSend.messages.findIndex(m => m.id === botMessageId))
-          : messagesForThisSendOperation.filter(m => m.id !== botMessageId && (m.sender !== 'bot' || (m.sender === 'bot' && !m.isLoading)));
+          : messagesForThisSendOperation.filter(m => m.id !== botMessageId && (m.sender !== 'bot' || (m.sender === 'bot' && !m.isLoading))))
 
       // REMOVED STREAMING LOGIC - DIRECTLY GET FULL RESPONSE
       const aggregatedResponse = await sendMessageToGemini(textToSend, historyForGemini, currentSystemInstruction);
