@@ -148,7 +148,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       }
 
       const final = await stream.response;
-      const finalText = final?.text?.trim() || fullText;
+      const finalText =
+  typeof final?.text === 'string' && final.text.trim().length > 0
+    ? final.text.trim()
+    : fullText;
       const sources = extractWebSources(final?.candidates?.[0]?.groundingMetadata?.groundingChunks);
 
       messages = messages.map(m =>
