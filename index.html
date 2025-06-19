@@ -70,23 +70,29 @@
         left: 0;
         width: 100%;
         height: 100%;
-        z-index: -1; /* Place it behind all content */
+        z-index: 1; /* Place it on top of the gradient but behind the UI */
+        pointer-events: none; /* Make canvas non-interactive to clicks */
+    }
+
+    #root {
+      position: relative;
+      z-index: 2; /* Ensure UI is on top of the canvas */
     }
 
     .glass-panel {
-      background: rgba(0, 0, 0, 0.02); /* Subtle dark tint - "1% darkness" effect */
+      background: rgba(0, 0, 0, 0.02);
       backdrop-filter: blur(20px) saturate(180%);
       -webkit-backdrop-filter: blur(20px) saturate(180%);
-      border: 1px solid rgba(255, 255, 255, 0.12); /* Lighter border for contrast */
+      border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 0.75rem;
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2); /* Slightly more pronounced shadow */
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
     }
 
     .glass-input {
-      background: rgba(0, 0, 0, 0.01); /* Subtle dark tint */
+      background: rgba(0, 0, 0, 0.01);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.15); /* Lighter border */
+      border: 1px solid rgba(255, 255, 255, 0.15);
       color: theme('colors.text-primary');
     }
     .glass-input::placeholder {
@@ -98,10 +104,10 @@
     }
 
     .glass-button {
-      background: rgba(0, 0, 0, 0.03); /* Subtle dark tint */
+      background: rgba(0, 0, 0, 0.03);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.2); /* Lighter border */
+      border: 1px solid rgba(255, 255, 255, 0.2);
       color: theme('colors.text-primary');
       transition: background-color 0.2s, border-color 0.2s;
     }
@@ -153,7 +159,7 @@
 
 
     .markdown-body pre {
-      background-color: rgba(0, 0, 0, 0.5); /* Maintained dark for code readability */
+      background-color: rgba(0, 0, 0, 0.5);
       color: #f0f0f0;
       padding: 1em;
       border-radius: 0.375rem;
@@ -161,7 +167,7 @@
       margin-bottom: 1em;
       font-family: monospace;
       font-size: 0.875em;
-      border: 1px solid rgba(255,255,255,0.15); /* Light border for contrast */
+      border: 1px solid rgba(255,255,255,0.15);
       position: relative;
     }
     .markdown-body pre code {
@@ -193,13 +199,13 @@
 
 
     .markdown-body code:not(pre > code) {
-      background-color: rgba(0, 0, 0, 0.15); /* Subtle dark inline code bg */
+      background-color: rgba(0, 0, 0, 0.15);
       color: theme('colors.text-secondary');
       padding: 0.2em 0.4em;
       border-radius: 0.25rem;
       font-family: monospace;
       font-size: 0.875em;
-      border: 1px solid rgba(255,255,255,0.1); /* Light border */
+      border: 1px solid rgba(255,255,255,0.1);
     }
 
     .markdown-body blockquote {
@@ -214,7 +220,7 @@
 
 
     .markdown-body a {
-      color: #60a5fa; /* Keep links bright */
+      color: #60a5fa;
       text-decoration: underline;
     }
     .markdown-body a:hover {
@@ -234,7 +240,7 @@
       text-align: left;
     }
     .markdown-body th {
-      background-color: rgba(0,0,0,0.05); /* Subtle dark tint for header */
+      background-color: rgba(0,0,0,0.05);
       font-weight: 600;
     }
     .markdown-body hr {
@@ -250,8 +256,8 @@
 
     /* Style for search term highlighting */
     .search-highlight {
-      background-color: rgba(255, 255, 0, 0.4); /* Slightly less opaque yellow */
-      color: #000; /* Black text for readability on yellow */
+      background-color: rgba(255, 255, 0, 0.4);
+      color: #000;
       padding: 0.1em;
       border-radius: 0.2em;
     }
@@ -277,8 +283,10 @@
 <link rel="stylesheet" href="/index.css">
 </head>
 <body class="text-text-primary">
-  <canvas id="interactive-bg-canvas"></canvas>
   <div id="root" class="h-full"></div>
+  
+  <canvas id="interactive-bg-canvas"></canvas>
+
   <script type="module" src="/index.tsx"></script>
 
   <script type="module">
@@ -299,70 +307,85 @@
             this.y = y;
             this.radius = 1;
             this.opacity = 1;
-            this.speed = 2;
-            this.lineWidth = 3;
-            // Use a light, semi-transparent color for the ripple
-            this.color = 'rgba(255, 255, 255, 0.3)';
+            this.speed = 2.5; // Slightly faster expansion
+            this.lineWidth = 2; // Thicker line for more presence
+            // A more opaque white for a stronger base color
+            this.color = 'rgba(255, 255, 255, 0.8)';
         }
 
         update() {
             this.radius += this.speed;
-            this.opacity -= 0.02;
+            // Slower fade out to keep the glow longer
+            this.opacity -= 0.015;
             if (this.opacity < 0) this.opacity = 0;
         }
 
         draw() {
+            ctx.save(); // Save the current context state
+            ctx.globalAlpha = this.opacity;
+
+            // --- Glow Effect ---
+            ctx.shadowColor = 'white'; // The color of the glow
+            ctx.shadowBlur = 15;      // The blur radius of the glow
+
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
             ctx.strokeStyle = this.color;
             ctx.lineWidth = this.lineWidth;
-            ctx.globalAlpha = this.opacity;
             ctx.stroke();
-            ctx.globalAlpha = 1; // Reset global alpha
+            
+            ctx.restore(); // Restore the context to its original state (removes shadow for next draw)
         }
     }
 
     function createRipple(x, y) {
+        // Add a new ripple at the specified coordinates
         ripples.push(new Ripple(x, y));
     }
+    
+    // We need to listen for events on the body/window now that canvas has pointer-events: none
+    const eventTarget = document.body;
 
-    // Event listener for mouse movement
-    window.addEventListener('mousemove', function(event) {
-        mouse.x = event.x;
-        mouse.y = event.y;
-        createRipple(mouse.x, mouse.y);
+    eventTarget.addEventListener('mousemove', function(event) {
+        createRipple(event.clientX, event.clientY);
     });
     
-    // Event listener for touch movement
-    window.addEventListener('touchmove', function(event) {
-        // Prevent scrolling while touching
-        event.preventDefault();
-        for (let i = 0; i < event.touches.length; i++) {
-            let touch = event.touches[i];
+    eventTarget.addEventListener('touchmove', function(event) {
+        // Use the first touch point
+        if (event.touches.length > 0) {
+            const touch = event.touches[0];
             createRipple(touch.clientX, touch.clientY);
         }
-    }, { passive: false });
+    }, { passive: true });
+
 
     function animate() {
+        // Clear the canvas for the next frame
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
+        // Loop through ripples backwards to allow for safe removal
         for (let i = ripples.length - 1; i >= 0; i--) {
-            ripples[i].update();
-            ripples[i].draw();
+            const ripple = ripples[i];
+            ripple.update();
+            ripple.draw();
 
-            if (ripples[i].opacity <= 0) {
+            // Remove the ripple if it has faded out completely
+            if (ripple.opacity <= 0) {
                 ripples.splice(i, 1);
             }
         }
 
+        // Request the next frame to continue the animation
         requestAnimationFrame(animate);
     }
 
+    // Adjust canvas size on window resize
     window.addEventListener('resize', () => {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
     });
 
+    // Start the animation loop
     animate();
   </script>
 
