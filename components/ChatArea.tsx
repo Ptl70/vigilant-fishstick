@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Message, ChatSession, WebSource, GenerateContentResponse, GroundingChunk, QuickPrompt } from '../types';
+import { Message, ChatSession, WebSource, GroundingChunk, QuickPrompt } from '../types';
 import ChatMessage from './ChatMessage';
 import LoadingSpinner from './LoadingSpinner';
 import {
-  SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon, RegenerateIcon, TrashIcon,
+  SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon, TrashIcon,
   BoltIcon, BoldIcon, ItalicIcon, CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon
 } from './Icons';
 import { sendMessage as sendMessageToGemini } from '../services/geminiService';
@@ -14,7 +14,6 @@ interface ChatAreaProps {
   isSending: boolean;
   setIsSending: (isSending: boolean) => void;
   isApiKeyMissing: boolean;
-  onRegenerate: (sessionToUpdate: ChatSession, messageToRegenerateId: string) => Promise<void>;
   initialSearchTerm?: string;
   onSearchTermChange?: (term: string) => void;
   quickPrompts: QuickPrompt[];
@@ -45,13 +44,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [activeChatSession?.messages, currentSearchTerm, scrollToBottom]);
+  }, [activeChatSession?.messages, currentSearchTerm]);
 
   useEffect(() => {
     setInput('');
     setError(null);
     setCurrentSearchTerm(initialSearchTerm);
-    if(textAreaRef.current) {
+    if (textAreaRef.current) {
       textAreaRef.current.style.height = 'auto';
     }
   }, [activeChatSession?.id, initialSearchTerm]);
@@ -84,12 +83,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }, [activeChatSession, currentSearchTerm]);
 
   const getLoadingMessageText = (): string => {
-    if (Math.random() < 0.3) return 'Searching...';
-    if (Math.random() < 0.6) return 'Working...';
-    return 'Thinking...';
+    const statuses = ['Thinking...', 'Searching...', 'Working...'];
+    return statuses[Math.floor(Math.random() * statuses.length)];
   };
 
-  const handleSend = async (messageTextOverride?: string, isRegeneration?: boolean, historyOverride?: Message[]) => {
+  const handleSend = async (messageTextOverride?: string, regenerationMessageId?: string) => {
     const textToSend = messageTextOverride || input.trim();
     if (textToSend === '' || isSending || !activeChatSession || isApiKeyMissing) return;
 
@@ -98,18 +96,33 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     let botMessageId: string;  
     const currentSystemInstruction = currentSessionStateBeforeSend.systemInstruction;  
 
-    if (isRegeneration) {  
-      const regenTargetIndex = currentSessionStateBeforeSend.messages.findIndex(m => m.isLoading && m.sender === 'bot');  
-      if (regenTargetIndex === -1) return;  
-      botMessageId = currentSessionStateBeforeSend.messages[regenTargetIndex].id;  
-      messagesForThisSendOperation = [...currentSessionStateBeforeSend.messages];  
+    if (regenerationMessageId) {  
+      // Regeneration flow
+      const botMessageIndex = currentSessionStateBeforeSend.messages.findIndex(m => m.id === regenerationMessageId);
+      if (botMessageIndex < 1) return;
+      const userPromptMessage = currentSessionStateBeforeSend.messages[botMessageIndex - 1];
+      
+      botMessageId = regenerationMessageId;
+      messagesForThisSendOperation = currentSessionStateBeforeSend.messages.map(msg => 
+        msg.id === regenerationMessageId 
+          ? { ...msg, text: getLoadingMessageText(), isLoading: true, isError: false, sources: [] } 
+          : msg
+      );
+      
+      onUpdateChatSession({  
+        ...currentSessionStateBeforeSend,  
+        messages: messagesForThisSendOperation,  
+        lastUpdatedAt: Date.now(),  
+      });  
     } else {  
+      // New message flow
       const userMessage: Message = {  
         id: Date.now().toString(),  
         sender: 'user',  
         text: textToSend,  
         timestamp: Date.now(),  
       };  
+      
       botMessageId = (Date.now() + 1).toString();  
       const botPlaceholderMessage: Message = {  
         id: botMessageId,  
@@ -118,6 +131,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         isLoading: true,  
         timestamp: Date.now() + 1,  
       };  
+      
       messagesForThisSendOperation = [...currentSessionStateBeforeSend.messages, userMessage, botPlaceholderMessage];  
       onUpdateChatSession({  
         ...currentSessionStateBeforeSend,  
@@ -126,18 +140,27 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       });  
     }  
 
-    if (!isRegeneration) {  
+    if (!regenerationMessageId) {  
       setInput('');  
-      if(textAreaRef.current) textAreaRef.current.style.height = 'auto';  
+      if (textAreaRef.current) textAreaRef.current.style.height = 'auto';  
     }  
+    
     setIsSending(true);  
     setError(null);  
 
     try {  
-      const historyForGemini = historyOverride ||   
-        (isRegeneration   
-          ? currentSessionStateBeforeSend.messages.slice(0, currentSessionStateBeforeSend.messages.findIndex(m => m.id === botMessageId))  
-          : messagesForThisSendOperation.filter(m => m.id !== botMessageId && m.sender !== 'bot' || (m.sender === 'bot' && !m.isLoading)));  
+      let historyForGemini: Message[] = [];
+      
+      if (regenerationMessageId) {
+        // For regeneration, use messages before the user's prompt
+        const botMessageIndex = currentSessionStateBeforeSend.messages.findIndex(m => m.id === regenerationMessageId);
+        historyForGemini = currentSessionStateBeforeSend.messages.slice(0, botMessageIndex - 1);
+      } else {
+        // For new messages, use all non-loading messages
+        historyForGemini = messagesForThisSendOperation.filter(
+          m => !m.isLoading || m.sender === 'user'
+        );
+      }
 
       const response = await sendMessageToGemini(textToSend, historyForGemini, currentSystemInstruction);  
       const aggregatedResponse = await response.response;  
@@ -157,36 +180,37 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           ? { ...msg, text: finalBotText, isLoading: false, sources, isError: false } 
           : msg  
       );  
-      onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });  
+      
+      onUpdateChatSession({ 
+        ...currentSessionStateBeforeSend, 
+        messages: messagesForThisSendOperation, 
+        lastUpdatedAt: Date.now() 
+      });  
 
     } catch (err: any) {  
       console.error("Error sending message:", err);  
       const errorMessage = err.message || "An unknown error occurred.";  
       setError(errorMessage);  
+      
       messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>  
-        msg.id === botMessageId ? { ...msg, text: `Error: ${errorMessage}`, isLoading: false, isError: true } : msg  
+        msg.id === botMessageId 
+          ? { ...msg, text: `Error: ${errorMessage}`, isLoading: false, isError: true } 
+          : msg  
       );  
-      onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });  
+      
+      onUpdateChatSession({ 
+        ...currentSessionStateBeforeSend, 
+        messages: messagesForThisSendOperation, 
+        lastUpdatedAt: Date.now() 
+      });  
     } finally {  
       setIsSending(false);  
     }
   };
 
-  const initiateRegeneration = async (messageId: string) => {
+  const initiateRegeneration = (messageId: string) => {
     if (!activeChatSession || isSending) return;
-    const botMessageToRegenerate = activeChatSession.messages.find(m => m.id === messageId && m.sender === 'bot');
-    if (!botMessageToRegenerate) return;
-    const botMessageIndex = activeChatSession.messages.findIndex(m => m.id === messageId);
-    if (botMessageIndex < 1) return;
-    const userPromptMessage = activeChatSession.messages[botMessageIndex - 1];
-    if (userPromptMessage.sender !== 'user') return;
-
-    const updatedMessagesForRegenUI = activeChatSession.messages.map(msg =>   
-        msg.id === messageId ? { ...msg, text: getLoadingMessageText(), isLoading: true, isError: false, sources: [] } : msg  
-    );  
-    onUpdateChatSession({ ...activeChatSession, messages: updatedMessagesForRegenUI, lastUpdatedAt: Date.now() });  
-    const historyForRegen = activeChatSession.messages.slice(0, botMessageIndex - 1);  
-    await handleSend(userPromptMessage.text, true, historyForRegen);
+    handleSend(undefined, messageId);
   };
 
   const applyMarkdownFormat = (formatType: 'bold' | 'italic' | 'inline-code' | 'code-block' | 'list-item') => {
@@ -211,11 +235,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         newText = `\`\`\`\n${selectedText}\n\`\`\``;  
         break;  
       case 'list-item':  
-        if (selectedText.includes('\n')) {  
-          newText = selectedText.split('\n').map(line => `- ${line}`).join('\n');  
-        } else {  
-          newText = `- ${selectedText}`;  
-        }  
+        newText = selectedText.includes('\n') 
+          ? selectedText.split('\n').map(line => `- ${line}`).join('\n')  
+          : `- ${selectedText}`;  
         break;  
       default:  
         return;  
@@ -229,8 +251,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       textarea.focus();
       const newCursorPosition = start + newText.length;
       textarea.setSelectionRange(newCursorPosition, newCursorPosition);
-      const event = new Event('input', { bubbles: true });
-      textarea.dispatchEvent(event);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
     }, 0);
   };
 
@@ -283,13 +304,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         </button>
       </header>
       <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 space-y-4">
-        {filteredMessages.map((msg, index, arr) => (
+        {filteredMessages.map((msg) => (
           <ChatMessage
             key={msg.id}
             message={msg}
             searchTerm={currentSearchTerm}
             onRegenerate={initiateRegeneration}
-            isLastBotMessage={index === arr.length - 1 && msg.sender === 'bot'}
           />
         ))}
         <div ref={messagesEndRef} />
@@ -322,11 +342,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       setShowQuickPrompts(false);
                       textAreaRef.current?.focus();
                       setTimeout(() => {
-                        if(textAreaRef.current) {
-                          const event = new Event('input', { bubbles: true });
-                          textAreaRef.current.dispatchEvent(event);
+                        if (textAreaRef.current) {
+                          textAreaRef.current.dispatchEvent(new Event('input', { bubbles: true }));
                         }
-                      },0);
+                      }, 0);
                     }}
                     className="block w-full text-left p-2.5 hover:bg-white/10 rounded-md text-xs"
                     title={qp.text}
@@ -363,7 +382,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             ref={textAreaRef}  
             value={input}  
             onChange={(e) => setInput(e.target.value)}  
-            onKeyPress={(e) => {  
+            onKeyDown={(e) => {  
               if (e.key === 'Enter' && !e.shiftKey && !isSending) {  
                 e.preventDefault();  
                 handleSend();  
@@ -374,9 +393,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             rows={1}  
             style={{ minHeight: '44px', maxHeight: '120px' }}   
             onInput={(e) => {  
-                const target = e.target as HTMLTextAreaElement;  
-                target.style.height = 'auto';  
-                target.style.height = `${Math.min(target.scrollHeight, 120)}px`;  
+              const target = e.target as HTMLTextAreaElement;  
+              target.style.height = 'auto';  
+              target.style.height = `${Math.min(target.scrollHeight, 120)}px`;  
             }}  
             disabled={isSending || isApiKeyMissing}  
             aria-label="Chat input"  
