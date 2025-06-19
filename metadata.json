@@ -1,0 +1,6 @@
+
+{
+  "name": "Patel Chat",
+  "description": "Patel Chat: An AI assistant built by Patel Yahya using Google Cloud services. It features web search grounding and rich Markdown responses.",
+  "requestFramePermissions": []
+}
