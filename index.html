@@ -34,7 +34,7 @@
       height: 8px;
     }
     ::-webkit-scrollbar-track {
-      background: rgba(0,0,0,0.2); /* Darker track for better contrast with light content */
+      background: rgba(0,0,0,0.2);
     }
     ::-webkit-scrollbar-thumb {
       background: rgba(255,255,255,0.25);
@@ -50,11 +50,11 @@
     body {
       font-family: 'Inter', sans-serif;
       color: theme('colors.text-primary');
-      background: linear-gradient(135deg, #ff00ff, #00ffff, #ffcc00, #ff00ff);
+      background: linear-gradient(135deg, #bf00bf, #00bfbf, #bf9900, #bf00bf);
       background-size: 400% 400%;
       animation: vibrantGradient 20s ease infinite;
       background-attachment: fixed;
-      position: relative; /* Needed for z-indexing canvas */
+      position: relative;
     }
 
     @keyframes vibrantGradient {
@@ -63,24 +63,23 @@
       100% { background-position: 0% 50%; }
     }
 
-    /* Canvas for the interactive background effect */
     #interactive-bg-canvas {
         position: fixed;
         top: 0;
         left: 0;
         width: 100%;
         height: 100%;
-        z-index: 1; /* Place it on top of the gradient but behind the UI */
-        pointer-events: none; /* Make canvas non-interactive to clicks */
+        z-index: 1;
+        pointer-events: none;
     }
 
     #root {
       position: relative;
-      z-index: 2; /* Ensure UI is on top of the canvas */
+      z-index: 2;
     }
 
     .glass-panel {
-      background: rgba(0, 0, 0, 0.02);
+      background: rgba(0, 0, 0, 0.1);
       backdrop-filter: blur(20px) saturate(180%);
       -webkit-backdrop-filter: blur(20px) saturate(180%);
       border: 1px solid rgba(255, 255, 255, 0.12);
@@ -89,7 +88,7 @@
     }
 
     .glass-input {
-      background: rgba(0, 0, 0, 0.01);
+      background: rgba(0, 0, 0, 0.05);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       border: 1px solid rgba(255, 255, 255, 0.15);
@@ -99,12 +98,12 @@
       color: theme('colors.text-muted');
     }
     .glass-input:focus {
-      background: rgba(0, 0, 0, 0.03);
+      background: rgba(0, 0, 0, 0.08);
       border-color: rgba(255, 255, 255, 0.25);
     }
 
     .glass-button {
-      background: rgba(0, 0, 0, 0.03);
+      background: rgba(0, 0, 0, 0.1);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       border: 1px solid rgba(255, 255, 255, 0.2);
@@ -112,7 +111,7 @@
       transition: background-color 0.2s, border-color 0.2s;
     }
     .glass-button:hover:not(:disabled) {
-      background: rgba(0, 0, 0, 0.06);
+      background: rgba(0, 0, 0, 0.15);
       border-color: rgba(255, 255, 255, 0.3);
     }
     .glass-button:disabled {
@@ -254,7 +253,6 @@
         content: "";
     }
 
-    /* Style for search term highlighting */
     .search-highlight {
       background-color: rgba(255, 255, 0, 0.4);
       color: #000;
@@ -280,14 +278,89 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body class="text-text-primary">
-  <div id="root" class="h-full"></div>
+  <div id="root" class="h-full flex flex-col">
+    <div class="flex-1 overflow-hidden">
+      <div class="h-full flex flex-col items-center justify-center p-4">
+        <div class="glass-panel w-full max-w-3xl p-6">
+          <h1 class="text-3xl font-bold text-center mb-6">Patel Chat</h1>
+          
+          <div class="chat-container h-[500px] overflow-y-auto mb-6">
+            <div class="message glass-panel p-4 mb-4">
+              <div class="flex items-start gap-3">
+                <div class="bg-gray-200 border-2 border-dashed rounded-xl w-10 h-10" />
+                <div>
+                  <div class="font-semibold">Assistant</div>
+                  <div class="mt-1">Welcome to Patel Chat! How can I assist you today?</div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="message glass-panel p-4 mb-4">
+              <div class="flex items-start gap-3">
+                <div class="bg-gray-200 border-2 border-dashed rounded-xl w-10 h-10" />
+                <div>
+                  <div class="font-semibold">User</div>
+                  <div class="mt-1">I need help with my project.</div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="message glass-panel p-4 mb-4">
+              <div class="flex items-start gap-3">
+                <div class="bg-gray-200 border-2 border-dashed rounded-xl w-10 h-10" />
+                <div>
+                  <div class="font-semibold">Assistant</div>
+                  <div class="mt-1">Sure, I'd be happy to help! Could you provide more details about what you're working on?</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="flex gap-2">
+            <input 
+              type="text" 
+              class="glass-input flex-1 px-4 py-3 rounded-lg" 
+              placeholder="Type your message here..."
+            >
+            <button class="glass-button px-6 py-3 rounded-lg font-medium">
+              Send
+            </button>
+          </div>
+          
+          <div class="mt-6 grid grid-cols-3 gap-4">
+            <div class="glass-panel p-4 rounded-lg">
+              <div class="text-lg font-semibold mb-2">Suggestions</div>
+              <ul class="space-y-2">
+                <li class="cursor-pointer hover:underline">How to use this chat</li>
+                <li class="cursor-pointer hover:underline">Technical support</li>
+                <li class="cursor-pointer hover:underline">Account questions</li>
+              </ul>
+            </div>
+            <div class="glass-panel p-4 rounded-lg">
+              <div class="text-lg font-semibold mb-2">Features</div>
+              <ul class="space-y-2">
+                <li>Real-time responses</li>
+                <li>Code formatting</li>
+                <li>Markdown support</li>
+              </ul>
+            </div>
+            <div class="glass-panel p-4 rounded-lg">
+              <div class="text-lg font-semibold mb-2">Status</div>
+              <div class="flex items-center">
+                <div class="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                <span>Online</span>
+              </div>
+              <div class="mt-2 text-sm">Response time: &lt; 1s</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
   
   <canvas id="interactive-bg-canvas"></canvas>
-
-  <script type="module" src="/index.tsx"></script>
 
   <script type="module">
     const canvas = document.getElementById('interactive-bg-canvas');
@@ -307,26 +380,22 @@
             this.y = y;
             this.radius = 1;
             this.opacity = 1;
-            this.speed = 2.5; // Slightly faster expansion
-            this.lineWidth = 2; // Thicker line for more presence
-            // A more opaque white for a stronger base color
+            this.speed = 2.5;
+            this.lineWidth = 2;
             this.color = 'rgba(255, 255, 255, 0.8)';
         }
 
         update() {
             this.radius += this.speed;
-            // Slower fade out to keep the glow longer
             this.opacity -= 0.015;
             if (this.opacity < 0) this.opacity = 0;
         }
 
         draw() {
-            ctx.save(); // Save the current context state
+            ctx.save();
             ctx.globalAlpha = this.opacity;
-
-            // --- Glow Effect ---
-            ctx.shadowColor = 'white'; // The color of the glow
-            ctx.shadowBlur = 15;      // The blur radius of the glow
+            ctx.shadowColor = 'white';
+            ctx.shadowBlur = 15;
 
             ctx.beginPath();
             ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
@@ -334,16 +403,14 @@
             ctx.lineWidth = this.lineWidth;
             ctx.stroke();
             
-            ctx.restore(); // Restore the context to its original state (removes shadow for next draw)
+            ctx.restore();
         }
     }
 
     function createRipple(x, y) {
-        // Add a new ripple at the specified coordinates
         ripples.push(new Ripple(x, y));
     }
     
-    // We need to listen for events on the body/window now that canvas has pointer-events: none
     const eventTarget = document.body;
 
     eventTarget.addEventListener('mousemove', function(event) {
@@ -351,7 +418,6 @@
     });
     
     eventTarget.addEventListener('touchmove', function(event) {
-        // Use the first touch point
         if (event.touches.length > 0) {
             const touch = event.touches[0];
             createRipple(touch.clientX, touch.clientY);
@@ -360,32 +426,26 @@
 
 
     function animate() {
-        // Clear the canvas for the next frame
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        // Loop through ripples backwards to allow for safe removal
         for (let i = ripples.length - 1; i >= 0; i--) {
             const ripple = ripples[i];
             ripple.update();
             ripple.draw();
 
-            // Remove the ripple if it has faded out completely
             if (ripple.opacity <= 0) {
                 ripples.splice(i, 1);
             }
         }
 
-        // Request the next frame to continue the animation
         requestAnimationFrame(animate);
     }
 
-    // Adjust canvas size on window resize
     window.addEventListener('resize', () => {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
     });
 
-    // Start the animation loop
     animate();
   </script>
 
