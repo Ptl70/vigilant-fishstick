@@ -81,9 +81,7 @@ switch (type) {
   case 'bold': formatted = `**${selected}**`; break;
   case 'italic': formatted = `*${selected}*`; break;
   case 'inline-code': formatted = `\`${selected}\``; break;
-  case 'code-block':
-  formatted = '\n\n' + '```' + '\n' + selected + '\n' + '```';
-  break;
+  case 'code-block': formatted = `\n\n\\`\\`\\`\n${selected}\n\\`\\`\\``; break;
   case 'list-item':
     formatted = selected.split('\n').map(line => `- ${line}`).join('\n');
     break;
