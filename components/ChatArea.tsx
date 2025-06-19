@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Message, ChatSession, WebSource, GenerateContentResponse, GroundingChunk, QuickPrompt } from '../types';
 import ChatMessage from './ChatMessage';
 import LoadingSpinner from './LoadingSpinner';
-import { 
+import {
   SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon, RegenerateIcon, TrashIcon,
-  BoltIcon, BoldIcon, ItalicIcon, CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon 
+  BoltIcon, BoldIcon, ItalicIcon, CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon
 } from './Icons';
 import { sendMessage as sendMessageToGemini } from '../services/geminiService';
 
@@ -51,8 +51,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setInput('');
     setError(null);
     setCurrentSearchTerm(initialSearchTerm);
-    if(textAreaRef.current) {
-        textAreaRef.current.style.height = 'auto';
+    if (textAreaRef.current) {
+      textAreaRef.current.style.height = 'auto';
     }
   }, [activeChatSession?.id, initialSearchTerm]);
 
@@ -83,35 +83,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     );
   }, [activeChatSession, currentSearchTerm]);
 
-  const handleSend = async (
-    messageTextOverride?: string,
-    isRegeneration?: boolean,
-    historyOverride?: Message[]
-  ) => {
+  const handleSend = async (messageTextOverride?: string, isRegeneration?: boolean, historyOverride?: Message[]) => {
     const textToSend = messageTextOverride || input.trim();
     if (textToSend === '' || isSending || !activeChatSession || isApiKeyMissing) return;
 
     const currentSessionStateBeforeSend = activeChatSession;
-
     let messagesForThisSendOperation: Message[];
     let botMessageId: string;
+
     const currentSystemInstruction = currentSessionStateBeforeSend.systemInstruction;
 
-    // 👇 If not regenerating, check if bot message already exists & has full text
-    if (!isRegeneration) {
-      const existingBotMessage = currentSessionStateBeforeSend.messages.find(
-        (m) => m.sender === 'bot' && !m.isLoading && !m.isError && m.text?.trim().length > 0
-      );
-      if (existingBotMessage) {
-        console.log("Bot response already present, skipping stream.");
-        return;
-      }
-    }
-
     if (isRegeneration) {
-      const regenTargetIndex = currentSessionStateBeforeSend.messages.findIndex(
-        (m) => m.isLoading && m.sender === 'bot'
-      );
+      const regenTargetIndex = currentSessionStateBeforeSend.messages.findIndex(m => m.isLoading && m.sender === 'bot');
       if (regenTargetIndex === -1) return;
       botMessageId = currentSessionStateBeforeSend.messages[regenTargetIndex].id;
       messagesForThisSendOperation = [...currentSessionStateBeforeSend.messages];
@@ -130,18 +113,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         isLoading: true,
         timestamp: Date.now() + 1,
       };
-      messagesForThisSendOperation = [
-        ...currentSessionStateBeforeSend.messages,
-        userMessage,
-        botPlaceholderMessage,
-      ];
-      const updatedSession = {
+      messagesForThisSendOperation = [...currentSessionStateBeforeSend.messages, userMessage, botPlaceholderMessage];
+      onUpdateChatSession({
         ...currentSessionStateBeforeSend,
         messages: messagesForThisSendOperation,
         lastUpdatedAt: Date.now(),
-      };
-      onUpdateChatSession(updatedSession);
-      localStorage.setItem('chat_' + updatedSession.id, JSON.stringify(updatedSession));
+      });
     }
 
     if (!isRegeneration) {
@@ -152,102 +129,53 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     setError(null);
 
     try {
-      const historyForGemini =
-        historyOverride ||
+      // Fixed history calculation logic
+      const historyForGemini = historyOverride ||
         (isRegeneration
-          ? currentSessionStateBeforeSend.messages.slice(
-              0,
-              currentSessionStateBeforeSend.messages.findIndex((m) => m.id === botMessageId)
+          ? currentSessionStateBeforeSend.messages.slice(0, currentSessionStateBeforeSend.messages.findIndex(m => m.id === botMessageId))
+          : messagesForThisSendOperation.filter(m => 
+              m.id !== botMessageId && 
+              (m.sender !== 'bot' || (m.sender === 'bot' && !m.isLoading))
             )
-          : messagesForThisSendOperation.filter(
-              (m) =>
-                m.id !== botMessageId &&
-                (m.sender !== 'bot' || (m.sender === 'bot' && !m.isLoading))
-            ));
+        );
 
-      let accumulatedBotText = '';
-      const stream = await sendMessageToGemini(
-        textToSend,
-        historyForGemini,
-        currentSystemInstruction
-      );
-
+      let accumulatedBotText = "";
+      const stream = await sendMessageToGemini(textToSend, historyForGemini, currentSystemInstruction);
+      
       for await (const chunk of stream) {
         if (chunk && typeof chunk.text === 'string') {
           accumulatedBotText += chunk.text;
         }
-        messagesForThisSendOperation = messagesForThisSendOperation.map((msg) =>
-          msg.id === botMessageId
-            ? { ...msg, text: accumulatedBotText, isLoading: true, isError: false }
-            : msg
+        messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>
+          msg.id === botMessageId ? { ...msg, text: accumulatedBotText, isLoading: true, isError: false } : msg
         );
-        const updatedSession = {
-          ...currentSessionStateBeforeSend,
-          messages: messagesForThisSendOperation,
-          lastUpdatedAt: Date.now(),
-        };
-        onUpdateChatSession(updatedSession);
-        localStorage.setItem('chat_' + updatedSession.id, JSON.stringify(updatedSession));
+        onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });
       }
-
+      
       const aggregatedResponse = await stream.response;
       let finalBotText = accumulatedBotText;
       let sources: WebSource[] = [];
 
       if (aggregatedResponse) {
-        if (
-          typeof aggregatedResponse.text === 'string' &&
-          aggregatedResponse.text.trim().length > 0
-        ) {
+        if (typeof aggregatedResponse.text === 'string' && aggregatedResponse.text.trim().length > 0) {
           finalBotText = aggregatedResponse.text;
         }
-        sources = extractWebSources(
-          aggregatedResponse.candidates?.[0]?.groundingMetadata?.groundingChunks
-        );
+        sources = extractWebSources(aggregatedResponse.candidates?.[0]?.groundingMetadata?.groundingChunks);
       }
 
-      messagesForThisSendOperation = messagesForThisSendOperation.map((msg) =>
-        msg.id === botMessageId
-          ? {
-              ...msg,
-              text: finalBotText,
-              isLoading: false,
-              isError: false,
-              sources: sources,
-            }
-          : msg
+      messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>
+        msg.id === botMessageId ? { ...msg, text: finalBotText, isLoading: false, sources: sources, isError: false } : msg
       );
+      onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });
 
-      const finalSession = {
-        ...currentSessionStateBeforeSend,
-        messages: messagesForThisSendOperation,
-        lastUpdatedAt: Date.now(),
-      };
-      onUpdateChatSession(finalSession);
-      localStorage.setItem('chat_' + finalSession.id, JSON.stringify(finalSession));
     } catch (err: any) {
-      console.error('Error sending message:', err);
-      const errorMessage = err.message || 'An unknown error occurred.';
+      console.error("Error sending message:", err);
+      const errorMessage = err.message || "An unknown error occurred.";
       setError(errorMessage);
-
-      messagesForThisSendOperation = messagesForThisSendOperation.map((msg) =>
-        msg.id === botMessageId
-          ? {
-              ...msg,
-              text: `Error: ${errorMessage}`,
-              isLoading: false,
-              isError: true,
-            }
-          : msg
+      messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>
+        msg.id === botMessageId ? { ...msg, text: `Error: ${errorMessage}`, isLoading: false, isError: true } : msg
       );
-
-      const erroredSession = {
-        ...currentSessionStateBeforeSend,
-        messages: messagesForThisSendOperation,
-        lastUpdatedAt: Date.now(),
-      };
-      onUpdateChatSession(erroredSession);
-      localStorage.setItem('chat_' + erroredSession.id, JSON.stringify(erroredSession));
+      onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });
     } finally {
       setIsSending(false);
     }
@@ -258,15 +186,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     const botMessageToRegenerate = activeChatSession.messages.find(m => m.id === messageId && m.sender === 'bot');
     if (!botMessageToRegenerate) return;
     const botMessageIndex = activeChatSession.messages.findIndex(m => m.id === messageId);
-    if (botMessageIndex < 1) return; 
+    if (botMessageIndex < 1) return;
     const userPromptMessage = activeChatSession.messages[botMessageIndex - 1];
     if (userPromptMessage.sender !== 'user') return;
+
+    // Fixed: Use correct slicing index to include user message
+    const historyForRegen = activeChatSession.messages.slice(0, botMessageIndex);
     
-    const updatedMessagesForRegenUI = activeChatSession.messages.map(msg => 
-        msg.id === messageId ? { ...msg, text: '', isLoading: true, isError: false, sources: [] } : msg
+    const updatedMessagesForRegenUI = activeChatSession.messages.map(msg =>   
+      msg.id === messageId ? { ...msg, text: '', isLoading: true, isError: false, sources: [] } : msg  
     );
+    
     onUpdateChatSession({ ...activeChatSession, messages: updatedMessagesForRegenUI, lastUpdatedAt: Date.now() });
-    const historyForRegen = activeChatSession.messages.slice(0, botMessageIndex - 1);
     await handleSend(userPromptMessage.text, true, historyForRegen);
   };
 
@@ -306,8 +237,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     const after = textarea.value.substring(end);
     setInput(before + newText + after);
 
-    const newCursorPosition = start + newText.length - (selectedText.length > 0 ? 0 : (formatType === 'code-block' ? 4 : (formatType === 'list-item' ? 0 : (formatType === 'bold' || formatType === 'italic' ? 1 : (formatType === 'inline-code' ? 1 : 0))))); 
-
+    const newCursorPosition = start + newText.length;
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(newCursorPosition, newCursorPosition);
@@ -366,8 +296,8 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       </header>
       <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 space-y-4">
         {filteredMessages.map((msg, index, arr) => (
-          <ChatMessage 
-            key={msg.id} 
+          <ChatMessage
+            key={msg.id}
             message={msg}
             searchTerm={currentSearchTerm}
             onRegenerate={initiateRegeneration}
@@ -382,7 +312,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             {error}
           </div>
         )}
-        {/* Quick Prompts Dropdown */}
+        
         {quickPrompts.length > 0 && (
           <div className="mb-2 relative">
             <button
@@ -392,7 +322,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             >
               <BoltIcon className="h-4 w-4 mr-2 text-yellow-400" />
               Quick Prompts
-              <svg className={`w-3 h-3 ml-auto transition-transform ${showQuickPrompts ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+              <svg className={`w-3 h-3 ml-auto transition-transform ${showQuickPrompts ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+              </svg>
             </button>
             {showQuickPrompts && (
               <div className="absolute bottom-full left-0 mb-1 w-full sm:w-72 max-h-48 overflow-y-auto glass-panel p-2 rounded-md shadow-lg z-10 border border-glass-stroke">
@@ -403,13 +335,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       setInput(prev => prev ? `${prev}\n${qp.text}` : qp.text);
                       setShowQuickPrompts(false);
                       textAreaRef.current?.focus();
-                       // Trigger input event to adjust textarea height
-                        setTimeout(() => {
-                            if(textAreaRef.current) {
-                                const event = new Event('input', { bubbles: true });
-                                textAreaRef.current.dispatchEvent(event);
-                            }
-                        },0);
+                      setTimeout(() => {
+                        if (textAreaRef.current) {
+                          const event = new Event('input', { bubbles: true });
+                          textAreaRef.current.dispatchEvent(event);
+                        }
+                      }, 0);
                     }}
                     className="block w-full text-left p-2.5 hover:bg-white/10 rounded-md text-xs"
                     title={qp.text}
@@ -422,7 +353,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             )}
           </div>
         )}
-        {/* Formatting Toolbar */}
+
         <div className="flex items-center space-x-1 mb-2">
           {['bold', 'italic', 'inline-code', 'code-block', 'list-item'].map(type => (
             <button
@@ -432,4 +363,50 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               title={type.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
               disabled={isSending || isApiKeyMissing}
             >
-              {type === 'bold' && <BoldIcon className="h-4 w-4"
+              {type === 'bold' && <BoldIcon className="h-4 w-4" />}
+              {type === 'italic' && <ItalicIcon className="h-4 w-4" />}
+              {type === 'inline-code' && <CodeBracketIcon className="h-4 w-4" />}
+              {type === 'code-block' && <CodeBracketSquareIcon className="h-4 w-4" />}
+              {type === 'list-item' && <ListBulletIcon className="h-4 w-4" />}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-end space-x-2 md:space-x-3">
+          <textarea
+            ref={textAreaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !isSending) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="Send a message (Shift+Enter for new line)..."
+            className="flex-1 p-3 glass-input rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none transition-shadow disabled:opacity-70 resize-none text-sm"
+            rows={1}
+            style={{ minHeight: '44px', maxHeight: '120px' }}
+            onInput={(e) => {
+              const target = e.target as HTMLTextAreaElement;
+              target.style.height = 'auto';
+              target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+            }}
+            disabled={isSending || isApiKeyMissing}
+            aria-label="Chat input"
+          />
+          <button
+            onClick={() => handleSend()}
+            disabled={isSending || input.trim() === '' || isApiKeyMissing}
+            className="p-3 glass-button rounded-lg font-semibold h-[44px] aspect-square flex items-center justify-center self-end"
+            aria-label="Send message"
+          >
+            {isSending ? <LoadingSpinner size="sm" color="white" /> : <SendIcon className="h-5 w-5 text-white" />}
+          </button>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default ChatArea;
