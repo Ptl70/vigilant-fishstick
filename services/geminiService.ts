@@ -7,7 +7,6 @@ import type {
 } from "@google/generative-ai";
 import { Message } from '../types';
 
-// Define ChatStream locally within this service
 interface ChatStream extends AsyncIterable<GenerateContentResponse> {
   response: Promise<GenerateContentResponse>;
 }
@@ -31,13 +30,9 @@ if (API_KEY) {
   console.error(apiKeyError);
 }
 
-export const getApiKeyError = (): string | null => {
-  return apiKeyError;
-};
+export const getApiKeyError = (): string | null => apiKeyError;
 
-export const isGeminiAvailable = (): boolean => {
-  return !!ai && !apiKeyError;
-};
+export const isGeminiAvailable = (): boolean => !!ai && !apiKeyError;
 
 const GLOBAL_GEMINI_SYSTEM_INSTRUCTION = `You are Patel Chat, a versatile AI assistant. Your goal is to provide the most relevant and helpful response.
 
@@ -65,6 +60,15 @@ const formatHistoryForGemini = (messages: Message[]): Content[] => {
   }));
 };
 
+// ✅ Ensures the chat history starts with a user message
+const sanitizeHistory = (history: Message[]): Message[] => {
+  const cleaned = [...history];
+  while (cleaned.length && cleaned[0].sender !== 'user') {
+    cleaned.shift();
+  }
+  return cleaned;
+};
+
 export const sendMessage = async (
   messageText: string,
   history: Message[],
@@ -90,9 +94,15 @@ export const sendMessage = async (
         parts: [{ text: activeSystemInstruction }]
       }
     });
-    
+
+    const cleanedHistory = sanitizeHistory(history);
+
+    if (cleanedHistory.length === 0 || cleanedHistory[0].sender !== 'user') {
+      throw new Error("Gemini API requires the first message in history to be from the user.");
+    }
+
     const chatInstance = model.startChat({
-      history: formatHistoryForGemini(history),
+      history: formatHistoryForGemini(cleanedHistory),
     });
 
     const result = await chatInstance.sendMessageStream(messageText);
@@ -105,7 +115,7 @@ export const sendMessage = async (
 
     let resolveAggregatedPromise: (value: GenerateContentResponse) => void;
     let rejectAggregatedPromise: (reason?: any) => void;
-    
+
     const aggregatedResponsePromise = new Promise<GenerateContentResponse>((resolve, reject) => {
       resolveAggregatedPromise = resolve;
       rejectAggregatedPromise = reject;
@@ -117,7 +127,7 @@ export const sendMessage = async (
         for await (const chunk of sdkStream) {
           const chunkText = chunk.text();
           fullText += chunkText;
-          
+
           const chunkResponse: GenerateContentResponse = {
             text: fullText,
             candidates: [{
@@ -128,7 +138,7 @@ export const sendMessage = async (
               index: 0
             }]
           };
-          
+
           yield chunkResponse;
         }
 
