@@ -6,8 +6,7 @@ import {
 import ChatMessage from './ChatMessage';
 import LoadingSpinner from './LoadingSpinner';
 import {
-  SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon,
-  RegenerateIcon, TrashIcon, BoltIcon, BoldIcon,
+  SendIcon, TrashIcon, BoldIcon,
   ItalicIcon, CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon
 } from './Icons';
 import { sendMessage as sendMessageToGemini } from '../services/geminiService';
@@ -39,8 +38,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [currentSearchTerm, setCurrentSearchTerm] = useState(initialSearchTerm);
-  const [showQuickPrompts, setShowQuickPrompts] = useState(false);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -67,14 +64,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     onSearchTermChange?.(term);
   };
 
-  const extractWebSources = (groundingChunks?: GroundingChunk[]): WebSource[] => {
-    if (!groundingChunks) return [];
-    return groundingChunks
-      .filter(chunk => chunk.web && chunk.web.uri)
-      .map(chunk => ({
-        uri: chunk.web.uri,
-        title: chunk.web.title || chunk.web.uri
-      }));
+  const extractWebSources = (chunks?: GroundingChunk[]): WebSource[] => {
+    if (!chunks) return [];
+    return chunks
+      .filter(chunk => chunk.web?.uri)
+      .map(chunk => ({ uri: chunk.web.uri, title: chunk.web.title || chunk.web.uri }));
   };
 
   const filteredMessages = useMemo(() => {
@@ -130,13 +124,11 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     } catch (err: any) {
       const errorText = err.message || 'An unknown error occurred.';
       setError(errorText);
-
       const errored = updated.map(msg =>
         msg.id === botId
           ? { ...msg, text: `Error: ${errorText}`, isError: true }
           : msg
       );
-
       onUpdateChatSession({ ...activeChatSession, messages: errored, lastUpdatedAt: Date.now() });
     } finally {
       setIsSending(false);
@@ -166,10 +158,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         formatted = `\n\n\`\`\`\n${selected}\n\`\`\`\n\n`;
         break;
       case 'list-item':
-        formatted = selected
-          .split('\n')
-          .map(line => `- ${line}`)
-          .join('\n');
+        formatted = selected.split('\n').map(line => `- ${line}`).join('\n');
         break;
     }
 
@@ -194,16 +183,16 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-900">
-      <header className="p-4 border-b border-gray-700">
+    <div className="flex flex-col h-full w-full backdrop-blur-xl bg-white/10 text-white rounded-xl shadow-md border border-white/20">
+      <header className="p-4 border-b border-white/20">
         <div className="flex justify-between items-center gap-2">
-          <h2 className="text-white text-lg truncate">{activeChatSession.title}</h2>
+          <h2 className="text-lg truncate">{activeChatSession.title}</h2>
           <input
             type="text"
             placeholder="Search..."
             value={currentSearchTerm}
             onChange={handleSearchChange}
-            className="text-sm p-2 rounded bg-gray-800 text-white w-1/2"
+            className="text-sm p-2 rounded bg-white/10 text-white border border-white/20 w-1/2"
           />
           <button onClick={onDeleteCurrentChat} className="text-red-400 p-2 hover:text-red-500">
             <TrashIcon className="h-5 w-5" />
@@ -224,7 +213,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
         <div ref={messagesEndRef} />
       </main>
 
-      <footer className="p-4 border-t border-gray-700 bg-gray-800">
+      <footer className="p-4 border-t border-white/20">
         {error && <div className="text-red-400 mb-2">{error}</div>}
 
         <div className="flex space-x-2 mb-2">
@@ -232,14 +221,14 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             <button
               key={idx}
               onClick={() => applyMarkdownFormat(['bold', 'italic', 'inline-code', 'code-block', 'list-item'][idx] as any)}
-              className="p-2 bg-gray-700 hover:bg-gray-600 text-white rounded"
+              className="p-2 bg-white/10 border border-white/20 hover:bg-white/20 rounded"
             >
               <Icon className="h-4 w-4" />
             </button>
           ))}
         </div>
 
-        <div className="flex space-x-2">
+        <div className="flex flex-col sm:flex-row sm:space-x-2 gap-2">
           <textarea
             ref={textAreaRef}
             value={input}
@@ -250,7 +239,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 handleSend();
               }
             }}
-            className="flex-1 p-2 bg-gray-700 text-white rounded resize-none"
+            className="flex-1 p-2 bg-white/10 border border-white/20 text-white rounded resize-none"
             rows={2}
             disabled={isSending || isApiKeyMissing}
           />
