@@ -1,389 +1,535 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Message, ChatSession, WebSource, GenerateContentResponse, GroundingChunk, QuickPrompt } from '../types';
-import ChatMessage from './ChatMessage';
-import LoadingSpinner from './LoadingSpinner';
-import {
-  SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon, RegenerateIcon, TrashIcon,
-  BoltIcon, BoldIcon, ItalicIcon, CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon
-} from './Icons';
-import { sendMessage as sendMessageToGemini } from '../services/geminiService';
+import React, { useState, useEffect, useCallback } from 'react';
+import { ChatSession, Message, QuickPrompt } from './types';
+import Sidebar from './components/Sidebar';
+import ChatArea from './components/ChatArea';
+import * as LocalStorageService from './services/localStorageService';
+import { getApiKeyError } from './services/geminiService';
+import { calculateNextStateAfterDeletion } from './services/chatLogicService';
+import { WarningIcon, HamburgerMenuIcon, TuneIcon, PlusCircleIcon, PencilSquareIcon, XCircleIcon } 
+  from './components/Icons'; 
 
-interface ChatAreaProps {
-  activeChatSession: ChatSession | null;
-  onUpdateChatSession: (updatedSession: ChatSession) => void;
-  isSending: boolean;
-  setIsSending: (isSending: boolean) => void;
-  isApiKeyMissing: boolean;
-  onRegenerate: (sessionToUpdate: ChatSession, messageToRegenerateId: string) => Promise<void>;
-  initialSearchTerm?: string;
-  onSearchTermChange?: (term: string) => void;
-  quickPrompts: QuickPrompt[];
-  onDeleteCurrentChat: () => void;
+interface SystemInstructionModalState {
+  isOpen: boolean;
+  sessionId: string | null;
+  currentInstruction: string;
 }
 
-const ChatArea: React.FC<ChatAreaProps> = ({
-  activeChatSession,
-  onUpdateChatSession,
-  isSending,
-  setIsSending,
-  isApiKeyMissing,
-  initialSearchTerm = '',
-  onSearchTermChange,
-  quickPrompts,
-  onDeleteCurrentChat
-}) => {
-  const [input, setInput] = useState<string>('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [currentSearchTerm, setCurrentSearchTerm] = useState<string>(initialSearchTerm);
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
-  const [showQuickPrompts, setShowQuickPrompts] = useState(false);
+interface QuickPromptModalState {
+  isOpen: boolean;
+  editingPrompt: QuickPrompt | null; 
+  formValue: { title: string; text: string };
+}
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+const App: React.FC = () => {
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(() => {
+    return LocalStorageService.getActiveChatSessionId();
+  });
+  const [isSending, setIsSending] = useState<boolean>(false);
+  const [apiKeyMissing, setApiKeyMissing] = useState<boolean>(false);
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [searchTermInActiveChat, setSearchTermInActiveChat] = useState<string>(''); 
+  const [streamingSpeed] = useState<number>(5);
+
+  const [systemInstructionModal, setSystemInstructionModal] = useState<SystemInstructionModalState>({
+    isOpen: false,
+    sessionId: null,
+    currentInstruction: '',
+  });
+
+  const [quickPrompts, setQuickPrompts] = useState<QuickPrompt[]>([]);
+  const [quickPromptModal, setQuickPromptModal] = useState<QuickPromptModalState>({
+    isOpen: false,
+    editingPrompt: null,
+    formValue: { title: '', text: '' },
+  });
+
+  useEffect(() => {
+    const keyError = getApiKeyError();
+    if (keyError) {
+      setApiKeyMissing(true);
+      setGlobalError(keyError);
+    } else {
+      setApiKeyMissing(false);
+    }
+
+    const loadedSessions = LocalStorageService.getChatSessions().map(session => ({
+      ...session,
+      messages: session.messages.map(msg => ({ 
+        ...msg, 
+        isLoading: false,
+        text: msg.text
+      }))
+    }));
+    
+    setChatSessions(loadedSessions);
+    setQuickPrompts(LocalStorageService.getQuickPrompts());
+
+    if (loadedSessions.length === 0 && !keyError) {
+        const newSession = createNewChatSession();
+        setChatSessions([newSession]); 
+    }
+  }, []); 
+
+  useEffect(() => {
+    LocalStorageService.saveChatSessions(chatSessions);
+  }, [chatSessions]);
+
+  useEffect(() => {
+    LocalStorageService.saveQuickPrompts(quickPrompts);
+  }, [quickPrompts]);
+  
+  useEffect(() => {
+    let newActiveIdToPersist: string | null = activeChatSessionId;
+    let shouldUpdateActiveIdState = false;
+
+    if (chatSessions.length > 0) {
+      const currentActiveIsValid = chatSessions.some(s => s.id === activeChatSessionId);
+      if (!currentActiveIsValid) {
+        newActiveIdToPersist = chatSessions[0].id;
+        shouldUpdateActiveIdState = true;
+      }
+    } else {
+      if (activeChatSessionId !== null) {
+        newActiveIdToPersist = null;
+        shouldUpdateActiveIdState = true;
+      }
+    }
+
+    if (shouldUpdateActiveIdState) {
+      setActiveChatSessionId(newActiveIdToPersist);
+    }
+    
+    LocalStorageService.setActiveChatSessionId(newActiveIdToPersist);
+  }, [chatSessions, activeChatSessionId]);
+
+  const createNewChatSession = (): ChatSession => {
+    const timestamp = Date.now();
+    return {
+      id: timestamp.toString(),
+      title: 'New Chat',
+      messages: [{
+        id: (timestamp + 1).toString(),
+        sender: 'bot',
+        text: "Welcome! I'm your AI assistant. How can I help you today?",
+        timestamp: timestamp + 1,
+        isLoading: false,
+      }],
+      createdAt: timestamp,
+      lastUpdatedAt: timestamp,
+      systemInstruction: '', 
+    };
+  };
+
+  const handleCreateNewChat = () => {
+    if (apiKeyMissing) return;
+    const newSession = createNewChatSession();
+    setChatSessions(prev => [newSession, ...prev]);
+    setActiveChatSessionId(newSession.id); 
+    if (window.innerWidth < 768) setIsSidebarOpen(false); 
+  };
+
+  const handleSelectChat = (sessionId: string) => {
+    setActiveChatSessionId(sessionId);
+    if (window.innerWidth < 768) setIsSidebarOpen(false); 
+  };
+  
+  const handleDeleteChat = (sessionIdToDelete: string) => {
+    const { updatedSessions, newActiveSessionId } = calculateNextStateAfterDeletion(
+      chatSessions,
+      sessionIdToDelete,
+      activeChatSessionId
+    );
+    setChatSessions(updatedSessions);
+    setActiveChatSessionId(newActiveSessionId);
+  };
+  
+  const handleDeleteCurrentChatFromArea = () => {
+    if (activeChatSessionId) {
+      const currentChat = chatSessions.find(s => s.id === activeChatSessionId);
+      if (window.confirm(`Delete "${currentChat?.title || 'this chat'}"?`)) {
+        handleDeleteChat(activeChatSessionId);
+      }
+    }
+  };
+
+  const handleRenameChatSession = useCallback((sessionId: string, newTitle: string) => {
+    setChatSessions(prev =>
+      prev.map(s => s.id === sessionId ? { 
+        ...s, 
+        title: newTitle.trim() || "Untitled Chat", 
+        lastUpdatedAt: Date.now() 
+      } : s)
+    );
   }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [activeChatSession?.messages, currentSearchTerm, scrollToBottom]);
-
-  useEffect(() => {
-    setInput('');
-    setError(null);
-    setCurrentSearchTerm(initialSearchTerm);
-    if (textAreaRef.current) {
-      textAreaRef.current.style.height = 'auto';
-    }
-  }, [activeChatSession?.id, initialSearchTerm]);
-
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newTerm = e.target.value;
-    setCurrentSearchTerm(newTerm);
-    if (onSearchTermChange) {
-      onSearchTermChange(newTerm);
-    }
-  };
-
-  const extractWebSources = (groundingChunks?: GroundingChunk[]): WebSource[] => {
-    if (!groundingChunks) return [];
-    const sources: WebSource[] = [];
-    groundingChunks.forEach(chunk => {
-      if (chunk.web && chunk.web.uri) {
-        sources.push({ uri: chunk.web.uri, title: chunk.web.title || chunk.web.uri });
-      }
-    });
-    return sources;
-  };
-
-  const filteredMessages = useMemo(() => {
-    if (!activeChatSession) return [];
-    if (!currentSearchTerm.trim()) return activeChatSession.messages;
-    return activeChatSession.messages.filter(msg =>
-      msg.text.toLowerCase().includes(currentSearchTerm.toLowerCase())
+  const handleUpdateChatSession = useCallback((updatedSession: ChatSession) => {
+    setChatSessions(prev =>
+        prev.map(s => {
+            if (s.id === updatedSession.id) {
+                let finalTitle = updatedSession.title;
+                if (s.title === "New Chat" && updatedSession.messages.length >= 2 && !s.systemInstruction) {
+                    const firstUserMessage = updatedSession.messages.find(m => m.sender === 'user');
+                    if (firstUserMessage) {
+                        finalTitle = LocalStorageService.generateChatTitle([firstUserMessage]);
+                    }
+                }
+                return { 
+                  ...updatedSession, 
+                  title: finalTitle, 
+                  lastUpdatedAt: Date.now(),
+                  messages: updatedSession.messages.map(msg => ({
+                    ...msg,
+                    text: msg.text
+                  }))
+                };
+            }
+            return s;
+        })
     );
-  }, [activeChatSession, currentSearchTerm]);
+  }, []);
 
-  const handleSend = async (messageTextOverride?: string, isRegeneration?: boolean, historyOverride?: Message[]) => {
-    const textToSend = messageTextOverride || input.trim();
-    if (textToSend === '' || isSending || !activeChatSession || isApiKeyMissing) return;
+  const handleRegenerateResponse = useCallback(async (sessionToUpdate: ChatSession, messageToRegenerateId: string) => {
+    if (!sessionToUpdate || isSending || apiKeyMissing) return;
 
-    const currentSessionStateBeforeSend = activeChatSession;
-    let messagesForThisSendOperation: Message[];
-    let botMessageId: string;
+    const messageIndex = sessionToUpdate.messages.findIndex(m => m.id === messageToRegenerateId);
+    if (messageIndex === -1 || sessionToUpdate.messages[messageIndex].sender !== 'bot') return; 
 
-    const currentSystemInstruction = currentSessionStateBeforeSend.systemInstruction;
+    const updatedMessages = sessionToUpdate.messages.map(msg => 
+      msg.id === messageToRegenerateId ? { ...msg, text: '', isLoading: true, isError: false, sources: [] } : msg
+    );
 
-    if (isRegeneration) {
-      const regenTargetIndex = currentSessionStateBeforeSend.messages.findIndex(m => m.isLoading && m.sender === 'bot');
-      if (regenTargetIndex === -1) return;
-      botMessageId = currentSessionStateBeforeSend.messages[regenTargetIndex].id;
-      messagesForThisSendOperation = [...currentSessionStateBeforeSend.messages];
-    } else {
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        sender: 'user',
-        text: textToSend,
-        timestamp: Date.now(),
-      };
-      botMessageId = (Date.now() + 1).toString();
-      const botPlaceholderMessage: Message = {
-        id: botMessageId,
-        sender: 'bot',
-        text: '',
-        isLoading: true,
-        timestamp: Date.now() + 1,
-      };
-      messagesForThisSendOperation = [...currentSessionStateBeforeSend.messages, userMessage, botPlaceholderMessage];
-      onUpdateChatSession({
-        ...currentSessionStateBeforeSend,
-        messages: messagesForThisSendOperation,
-        lastUpdatedAt: Date.now(),
+    handleUpdateChatSession({
+      ...sessionToUpdate,
+      messages: updatedMessages,
+      lastUpdatedAt: Date.now(),
+    });
+  }, [isSending, apiKeyMissing, handleUpdateChatSession]);
+
+  const activeChat = chatSessions.find(s => s.id === activeChatSessionId) || null;
+
+  const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+
+  const handleExportChats = () => {
+    if (chatSessions.length === 0) {
+      alert("No chats to export.");
+      return;
+    }
+    const fileName = `chat_backup_${new Date().toISOString().slice(0,10)}.json`;
+    const jsonString = JSON.stringify(chatSessions, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(href);
+    setGlobalError("Chats exported!");
+    setTimeout(() => setGlobalError(null), 3000);
+  };
+
+  const handleImportChats = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const importedSessions = JSON.parse(text) as ChatSession[];
+        if (!Array.isArray(importedSessions) || !importedSessions.every(s => s.id && s.title && Array.isArray(s.messages))) {
+          throw new Error("Invalid file format.");
+        }
+        
+        if (window.confirm("Importing will replace all current chats. Continue?")) {
+          const processedSessions = importedSessions.map(session => ({
+            ...session,
+            messages: session.messages.map(msg => ({ ...msg, isLoading: false }))
+          }));
+          
+          setChatSessions(processedSessions);
+          setActiveChatSessionId(processedSessions.length > 0 ? processedSessions[0].id : null);
+          setGlobalError("Chats imported!");
+        }
+      } catch (error: any) {
+        setGlobalError(`Import failed: ${error.message || 'Invalid file'}`);
+      } finally {
+        event.target.value = ''; 
+        setTimeout(() => setGlobalError(null), 5000);
+      }
+    };
+    reader.readAsText(file);
+  };
+  
+  const handleOpenSystemInstructionModal = (sessionId: string) => {
+    const session = chatSessions.find(s => s.id === sessionId);
+    if (session) {
+      setSystemInstructionModal({
+        isOpen: true,
+        sessionId: sessionId,
+        currentInstruction: session.systemInstruction || '',
       });
     }
+  };
 
-    if (!isRegeneration) {
-      setInput('');
-      if (textAreaRef.current) textAreaRef.current.style.height = 'auto';
-    }
-    setIsSending(true);
-    setError(null);
-
-    try {
-      const historyForGemini = historyOverride ||
-        (isRegeneration
-          ? currentSessionStateBeforeSend.messages.slice(0, currentSessionStateBeforeSend.messages.findIndex(m => m.id === botMessageId))
-          : messagesForThisSendOperation.filter(m => m.id !== botMessageId && (m.sender !== 'bot' || (m.sender === 'bot' && !m.isLoading))))
-
-      // REMOVED STREAMING LOGIC - DIRECTLY GET FULL RESPONSE
-      const aggregatedResponse = await sendMessageToGemini(textToSend, historyForGemini, currentSystemInstruction);
-
-      let finalBotText = '';
-      let sources: WebSource[] = [];
-
-      if (aggregatedResponse) {
-        if (typeof aggregatedResponse.text === 'string') {
-          finalBotText = aggregatedResponse.text;
-        }
-        sources = extractWebSources(aggregatedResponse.candidates?.[0]?.groundingMetadata?.groundingChunks);
-      }
-
-      messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>
-        msg.id === botMessageId ? { ...msg, text: finalBotText, isLoading: false, sources: sources, isError: false } : msg
+  const handleSaveSystemInstruction = () => {
+    if (systemInstructionModal.sessionId) {
+      setChatSessions(prevSessions =>
+        prevSessions.map(s =>
+          s.id === systemInstructionModal.sessionId
+            ? { ...s, systemInstruction: systemInstructionModal.currentInstruction, lastUpdatedAt: Date.now() }
+            : s
+        )
       );
-      onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });
+    }
+    setSystemInstructionModal({ isOpen: false, sessionId: null, currentInstruction: '' });
+  };
 
-    } catch (err: any) {
-      console.error("Error sending message:", err);
-      const errorMessage = err.message || "An unknown error occurred.";
-      setError(errorMessage);
-      messagesForThisSendOperation = messagesForThisSendOperation.map(msg =>
-        msg.id === botMessageId ? { ...msg, text: `Error: ${errorMessage}`, isLoading: false, isError: true } : msg
+  const openQuickPromptModal = (promptToEdit: QuickPrompt | null = null) => {
+    if (promptToEdit) {
+      setQuickPromptModal({
+        isOpen: true,
+        editingPrompt: promptToEdit,
+        formValue: { title: promptToEdit.title, text: promptToEdit.text },
+      });
+    } else {
+      setQuickPromptModal({
+        isOpen: true,
+        editingPrompt: null,
+        formValue: { title: '', text: '' },
+      });
+    }
+  };
+
+  const closeQuickPromptModal = () => {
+    setQuickPromptModal({ isOpen: false, editingPrompt: null, formValue: { title: '', text: '' } });
+  };
+
+  const handleQuickPromptFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setQuickPromptModal(prev => ({
+      ...prev,
+      formValue: { ...prev.formValue, [name]: value },
+    }));
+  };
+
+  const handleSaveQuickPrompt = () => {
+    if (!quickPromptModal.formValue.title.trim() || !quickPromptModal.formValue.text.trim()) {
+      alert("Title and prompt text are required.");
+      return;
+    }
+
+    if (quickPromptModal.editingPrompt) { 
+      setQuickPrompts(prev =>
+        prev.map(p =>
+          p.id === quickPromptModal.editingPrompt?.id ? { ...quickPromptModal.editingPrompt, ...quickPromptModal.formValue } : p
+        )
       );
-      onUpdateChatSession({ ...currentSessionStateBeforeSend, messages: messagesForThisSendOperation, lastUpdatedAt: Date.now() });
-    } finally {
-      setIsSending(false);
+    } else { 
+      const newPrompt: QuickPrompt = {
+        id: Date.now().toString(),
+        ...quickPromptModal.formValue,
+      };
+      setQuickPrompts(prev => [newPrompt, ...prev]);
+    }
+    closeQuickPromptModal();
+  };
+
+  const handleDeleteQuickPrompt = (promptId: string) => {
+    if (window.confirm("Delete this quick prompt?")) {
+      setQuickPrompts(prev => prev.filter(p => p.id !== promptId));
     }
   };
-
-  const initiateRegeneration = async (messageId: string) => {
-    if (!activeChatSession || isSending) return;
-    const botMessageToRegenerate = activeChatSession.messages.find(m => m.id === messageId && m.sender === 'bot');
-    if (!botMessageToRegenerate) return;
-    const botMessageIndex = activeChatSession.messages.findIndex(m => m.id === messageId);
-    if (botMessageIndex < 1) return;
-    const userPromptMessage = activeChatSession.messages[botMessageIndex - 1];
-    if (userPromptMessage.sender !== 'user') return;
-
-    const updatedMessagesForRegenUI = activeChatSession.messages.map(msg =>
-      msg.id === messageId ? { ...msg, text: '', isLoading: true, isError: false, sources: [] } : msg
-    );
-    onUpdateChatSession({ ...activeChatSession, messages: updatedMessagesForRegenUI, lastUpdatedAt: Date.now() });
-    const historyForRegen = activeChatSession.messages.slice(0, botMessageIndex - 1);
-    await handleSend(userPromptMessage.text, true, historyForRegen);
-  };
-
-  const applyMarkdownFormat = (formatType: 'bold' | 'italic' | 'inline-code' | 'code-block' | 'list-item') => {
-    if (!textAreaRef.current) return;
-    const textarea = textAreaRef.current;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selectedText = textarea.value.substring(start, end);
-    let newText = '';
-
-    switch (formatType) {
-      case 'bold':
-        newText = `**${selectedText}**`;
-        break;
-      case 'italic':
-        newText = `*${selectedText}*`;
-        break;
-      case 'inline-code':
-        newText = `\`${selectedText}\``;
-        break;
-      case 'code-block':
-        newText = `\`\`\`\n${selectedText}\n\`\`\``;
-        break;
-      case 'list-item':
-        if (selectedText.includes('\n')) {
-          newText = selectedText.split('\n').map(line => `- ${line}`).join('\n');
-        } else {
-          newText = `- ${selectedText}`;
-        }
-        break;
-      default:
-        return;
-    }
-
-    const before = textarea.value.substring(0, start);
-    const after = textarea.value.substring(end);
-    setInput(before + newText + after);
-
-    setTimeout(() => {
-      textarea.focus();
-      const newCursorPosition = start + newText.length;
-      textarea.setSelectionRange(newCursorPosition, newCursorPosition);
-      const event = new Event('input', { bubbles: true });
-      textarea.dispatchEvent(event);
-    }, 0);
-  };
-
-  if (isApiKeyMissing && !activeChatSession) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center glass-panel m-2 sm:m-4">
-        <WarningIcon className="h-16 w-16 text-red-400 mb-6" />
-        <h2 className="text-xl sm:text-2xl font-semibold text-white mb-3">API Key Error</h2>
-        <p className="text-text-secondary text-sm sm:text-base">
-          The Gemini API key is missing or invalid. Please set the <code>API_KEY</code> environment variable.
-        </p>
-      </div>
-    );
-  }
-
-  if (!activeChatSession) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center glass-panel m-2 sm:m-4">
-        <ChatBubbleSvgIcon className="h-16 w-16 text-text-muted mb-6" />
-        <h2 className="text-xl sm:text-2xl font-semibold text-white mb-3">No Chat Selected</h2>
-        <p className="text-text-secondary text-sm sm:text-base">Select or create a chat from the sidebar to begin.</p>
-      </div>
-    );
-  }
 
   return (
-    <div className="flex-1 flex flex-col glass-panel min-w-0">
-      <header className="p-3 sm:p-4 border-b border-glass-stroke flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-4">
-        <h2 className="text-md sm:text-lg font-semibold text-white truncate order-1 sm:order-none flex-1 min-w-0" title={activeChatSession.title}>
-          {activeChatSession.title}
-        </h2>
-        <div className="relative w-full sm:w-auto sm:max-w-xs md:max-w-sm order-none sm:order-1 flex-shrink">
-          <input
-            type="text"
-            placeholder="Search in chat..."
-            value={currentSearchTerm}
-            onChange={handleSearchChange}
-            className="w-full pl-10 pr-3 py-2 text-xs sm:text-sm glass-input rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none transition-shadow"
-          />
-          <SearchIcon className="h-4 w-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
-        </div>
-        <button
-          onClick={onDeleteCurrentChat}
-          className="p-2 glass-button rounded-lg text-text-muted hover:text-red-400 order-2 sm:order-2"
-          title="Delete Current Chat"
-          aria-label="Delete Current Chat"
-          disabled={!activeChatSession}
-        >
-          <TrashIcon className="h-5 w-5" />
-        </button>
-      </header>
-      <main className="flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 space-y-4">
-        {filteredMessages.map((msg, index, arr) => (
-          <ChatMessage
-            key={msg.id}
-            message={msg}
-            searchTerm={currentSearchTerm}
-            onRegenerate={initiateRegeneration}
-            isLastBotMessage={index === arr.length - 1 && msg.sender === 'bot'}
-          />
-        ))}
-        <div ref={messagesEndRef} />
-      </main>
-      <footer className="p-2 sm:p-3 md:p-4 border-t border-glass-stroke">
-        {error && (
-          <div className="mb-2 p-3 bg-red-500/30 text-red-100 border border-red-500/50 rounded-lg text-xs sm:text-sm">
-            {error}
+    <div className="flex h-screen w-screen antialiased text-text-primary p-2 sm:p-4 gap-2 sm:gap-4 relative">
+      <button 
+        onClick={toggleSidebar}
+        className="md:hidden fixed top-3 left-3 z-40 p-2 glass-button rounded-md"
+        aria-label="Open sidebar"
+      >
+        <HamburgerMenuIcon className="h-6 w-6 text-white" />
+      </button>
+
+      <Sidebar
+        chatSessions={chatSessions}
+        activeChatSessionId={activeChatSessionId}
+        onSelectChat={handleSelectChat}
+        onCreateNewChat={handleCreateNewChat}
+        onDeleteChat={handleDeleteChat}
+        onRenameChat={handleRenameChatSession}
+        isApiKeyMissing={apiKeyMissing}
+        isOpen={isSidebarOpen}
+        onClose={toggleSidebar}
+        onExportChats={handleExportChats}
+        onImportChats={handleImportChats}
+        onTuneChat={handleOpenSystemInstructionModal}
+        onManageQuickPrompts={() => openQuickPromptModal(null)}
+      />
+      
+      {isSidebarOpen && window.innerWidth < 768 && (
+        <div 
+          onClick={toggleSidebar} 
+          className="md:hidden fixed inset-0 bg-black/30 backdrop-blur-sm z-20"
+          aria-hidden="true"
+        ></div>
+      )}
+
+      <ChatArea
+        key={activeChatSessionId} 
+        activeChatSession={activeChat}
+        onUpdateChatSession={handleUpdateChatSession}
+        isSending={isSending}
+        setIsSending={setIsSending}
+        isApiKeyMissing={apiKeyMissing}
+        onRegenerate={handleRegenerateResponse}
+        initialSearchTerm={searchTermInActiveChat} 
+        onSearchTermChange={setSearchTermInActiveChat}
+        quickPrompts={quickPrompts}
+        onDeleteCurrentChat={handleDeleteCurrentChatFromArea}
+        streamingSpeed={streamingSpeed}
+      />
+
+      {systemInstructionModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="glass-panel p-6 rounded-lg shadow-xl w-full max-w-lg text-text-primary">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Custom Instructions</h3>
+              <button onClick={() => setSystemInstructionModal({ isOpen: false, sessionId: null, currentInstruction: '' })} className="p-1 text-text-muted hover:text-text-primary">&times;</button>
+            </div>
+            <p className="text-sm text-text-secondary mb-3">Set instructions for this chat:</p>
+            <textarea
+              value={systemInstructionModal.currentInstruction}
+              onChange={(e) => setSystemInstructionModal(prev => ({ ...prev, currentInstruction: e.target.value }))}
+              rows={8}
+              className="w-full p-2.5 glass-input rounded-md text-sm mb-4 focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+              placeholder="Example: Respond as a Python expert..."
+            />
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setSystemInstructionModal({ isOpen: false, sessionId: null, currentInstruction: '' })}
+                className="px-4 py-2 text-sm glass-button rounded-md hover:bg-white/5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveSystemInstruction}
+                className="px-4 py-2 text-sm bg-blue-500/80 hover:bg-blue-500/100 text-white rounded-md glass-button"
+              >
+                Save
+              </button>
+            </div>
           </div>
-        )}
-        {quickPrompts.length > 0 && (
-          <div className="mb-2 relative">
-            <button
-              onClick={() => setShowQuickPrompts(!showQuickPrompts)}
-              className="flex items-center w-full sm:w-auto text-left p-2 glass-button rounded-md text-xs hover:bg-white/10"
-              title="Use a Quick Prompt"
-            >
-              <BoltIcon className="h-4 w-4 mr-2 text-yellow-400" />
-              Quick Prompts
-              <svg className={`w-3 h-3 ml-auto transition-transform ${showQuickPrompts ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-            </button>
-            {showQuickPrompts && (
-              <div className="absolute bottom-full left-0 mb-1 w-full sm:w-72 max-h-48 overflow-y-auto glass-panel p-2 rounded-md shadow-lg z-10 border border-glass-stroke">
-                {quickPrompts.map(qp => (
+        </div>
+      )}
+
+      {quickPromptModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="glass-panel p-6 rounded-lg shadow-xl w-full max-w-xl text-text-primary">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">
+                {quickPromptModal.editingPrompt ? 'Edit Prompt' : 'Add New Prompt'}
+              </h3>
+              <button onClick={closeQuickPromptModal} className="p-1 text-text-muted hover:text-text-primary">&times;</button>
+            </div>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-text-secondary mb-1">Title</label>
+              <input
+                type="text"
+                name="title"
+                value={quickPromptModal.formValue.title}
+                onChange={handleQuickPromptFormChange}
+                className="w-full p-2.5 glass-input rounded-md text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+                placeholder="Prompt title..."
+              />
+            </div>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-text-secondary mb-1">Content</label>
+              <textarea
+                name="text"
+                value={quickPromptModal.formValue.text}
+                onChange={handleQuickPromptFormChange}
+                rows={5}
+                className="w-full p-2.5 glass-input rounded-md text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+                placeholder="Enter prompt content..."
+              />
+            </div>
+            <div className="flex justify-between items-center">
+              <div> 
+                {quickPromptModal.editingPrompt && (
                   <button
-                    key={qp.id}
-                    onClick={() => {
-                      setInput(prev => prev ? `${prev}\n${qp.text}` : qp.text);
-                      setShowQuickPrompts(false);
-                      textAreaRef.current?.focus();
-                      setTimeout(() => {
-                        if (textAreaRef.current) {
-                          const event = new Event('input', { bubbles: true });
-                          textAreaRef.current.dispatchEvent(event);
-                        }
-                      }, 0);
-                    }}
-                    className="block w-full text-left p-2.5 hover:bg-white/10 rounded-md text-xs"
-                    title={qp.text}
+                    onClick={() => openQuickPromptModal(null)} 
+                    className="flex items-center text-xs text-blue-400 hover:text-blue-300 glass-button p-2 rounded-md"
                   >
-                    <p className="font-medium text-text-primary truncate">{qp.title}</p>
-                    <p className="text-text-muted truncate text-xs">{qp.text}</p>
+                    <PlusCircleIcon className="h-4 w-4 mr-1.5" /> Add New
                   </button>
-                ))}
+                )}
+              </div>
+              <div className="flex space-x-3">
+                <button
+                  onClick={closeQuickPromptModal}
+                  className="px-4 py-2 text-sm glass-button rounded-md hover:bg-white/5"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveQuickPrompt}
+                  className="px-4 py-2 text-sm bg-blue-500/80 hover:bg-blue-500/100 text-white rounded-md glass-button"
+                >
+                  {quickPromptModal.editingPrompt ? 'Save' : 'Add'}
+                </button>
+              </div>
+            </div>
+
+            {!quickPromptModal.editingPrompt && quickPrompts.length > 0 && (
+              <div className="mt-6 pt-4 border-t border-white/10">
+                <h4 className="text-md font-semibold text-white mb-2">Existing Prompts</h4>
+                <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+                  {quickPrompts.map(qp => (
+                    <div key={qp.id} className="flex items-center justify-between p-2.5 glass-input rounded-md text-sm hover:bg-white/5">
+                      <div className="flex-1 overflow-hidden">
+                        <p className="font-medium text-text-primary truncate">{qp.title}</p>
+                        <p className="text-xs text-text-muted truncate">{qp.text}</p>
+                      </div>
+                      <div className="flex-shrink-0 flex items-center space-x-2 ml-2">
+                        <button onClick={() => openQuickPromptModal(qp)} className="p-1 text-text-muted hover:text-blue-400">
+                          <PencilSquareIcon className="h-4 w-4"/>
+                        </button>
+                        <button onClick={() => handleDeleteQuickPrompt(qp.id)} className="p-1 text-text-muted hover:text-red-400">
+                          <XCircleIcon className="h-4 w-4"/>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
-        )}
-        <div className="flex items-center space-x-1 mb-2">
-          {['bold', 'italic', 'inline-code', 'code-block', 'list-item'].map(type => (
-            <button
-              key={type}
-              onClick={() => applyMarkdownFormat(type as any)}
-              className="p-2 glass-button rounded-md hover:bg-white/10"
-              title={type.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-              disabled={isSending || isApiKeyMissing}
-            >
-              {type === 'bold' && <BoldIcon className="h-4 w-4" />}
-              {type === 'italic' && <ItalicIcon className="h-4 w-4" />}
-              {type === 'inline-code' && <CodeBracketIcon className="h-4 w-4" />}
-              {type === 'code-block' && <CodeBracketSquareIcon className="h-4 w-4" />}
-              {type === 'list-item' && <ListBulletIcon className="h-4 w-4" />}
-            </button>
-          ))}
         </div>
+      )}
 
-        <div className="flex items-end space-x-2 md:space-x-3">
-          <textarea
-            ref={textAreaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !isSending) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder="Send a message (Shift+Enter for new line)..."
-            className="flex-1 p-3 glass-input rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none transition-shadow disabled:opacity-70 resize-none text-sm"
-            rows={1}
-            style={{ minHeight: '44px', maxHeight: '120px' }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement;
-              target.style.height = 'auto';
-              target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
-            }}
-            disabled={isSending || isApiKeyMissing}
-            aria-label="Chat input"
-          />
-          <button
-            onClick={() => handleSend()}
-            disabled={isSending || input.trim() === '' || isApiKeyMissing}
-            className="p-3 glass-button rounded-lg font-semibold h-[44px] aspect-square flex items-center justify-center self-end"
-            aria-label="Send message"
-          >
-            {isSending ? <LoadingSpinner size="sm" color="white" /> : <SendIcon className="h-5 w-5 text-white" />}
-          </button>
+      {apiKeyMissing && !activeChat && (
+         <div className="fixed inset-0 bg-black bg-opacity-80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+            <div className="glass-panel p-8 rounded-lg shadow-xl text-center max-w-md">
+              <WarningIcon className="h-16 w-16 text-red-400 mx-auto mb-6" />
+              <h2 className="text-2xl font-semibold text-white mb-3">Configuration Required</h2>
+              <p className="text-text-secondary mb-4">{globalError || 'Missing API key configuration'}</p>
+              <p className="text-sm text-text-muted">Set the API_KEY environment variable to continue</p>
+            </div>
+         </div>
+       )}
+       
+      {globalError && (apiKeyMissing ? !activeChat : true) && ( 
+        <div className="fixed bottom-5 right-5 glass-panel p-3 text-sm text-white rounded-md shadow-lg z-50">
+          {globalError}
         </div>
-      </footer>
+      )}
     </div>
   );
 };
 
-export default ChatArea;
+export default App;
