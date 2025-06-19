@@ -2,16 +2,6 @@
   command = "npm run build"
   publish = "dist"
 
-[build.environment]
-  NODE_VERSION = "18"
-  RUBY_VERSION = "3.4.3"
-
-[dev]
-  command = "npm run dev"
-  port = 3000
-  targetPort = 5173
-  publish = "dist"
-
 [[redirects]]
   from = "/*"
   to = "/index.html"
