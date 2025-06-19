@@ -17,9 +17,7 @@ setQuickPrompts(LocalStorageService.getQuickPrompts());
 if (loadedSessions.length === 0 && !keyError) {
   const newSession = createNewChatSession();
   setChatSessions([newSession]);
-};
-
-}, []);
+	}
 
 useEffect(() => { LocalStorageService.saveChatSessions(chatSessions); }, [chatSessions]);
 
