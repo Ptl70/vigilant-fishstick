@@ -1,4 +1,9 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'; import { Message, ChatSession, WebSource, GenerateContentResponse, GroundingChunk, QuickPrompt } from '../types'; import ChatMessage from './ChatMessage'; import LoadingSpinner from './LoadingSpinner'; import { SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon, RegenerateIcon, TrashIcon, BoltIcon, BoldIcon, ItalicIcon, CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon } from './Icons'; import { sendMessage as sendMessageToGemini } from '../services/geminiService';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Message, ChatSession, WebSource, GenerateContentResponse, GroundingChunk, QuickPrompt } from '../types';
+import ChatMessage from './ChatMessage'; 
+import LoadingSpinner from './LoadingSpinner'; 
+import { SendIcon, WarningIcon, ChatBubbleSvgIcon, SearchIcon, RegenerateIcon, TrashIcon, BoltIcon, BoldIcon, ItalicIcon, CodeBracketIcon, CodeBracketSquareIcon, ListBulletIcon } from './Icons';
+import { sendMessage as sendMessageToGemini } from '../services/geminiService';
 
 interface ChatAreaProps { activeChatSession: ChatSession | null; onUpdateChatSession: (updatedSession: ChatSession) => void; isSending: boolean; setIsSending: (isSending: boolean) => void; isApiKeyMissing: boolean; onRegenerate: (sessionToUpdate: ChatSession, messageToRegenerateId: string) => Promise<void>; initialSearchTerm?: string; onSearchTermChange?: (term: string) => void; quickPrompts: QuickPrompt[]; onDeleteCurrentChat: () => void; }
 
